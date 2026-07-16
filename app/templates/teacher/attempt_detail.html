@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ attempt.student.full_name }} - {{ attempt.quiz.title }}{% endblock %}
+{% block content %}
+<h3>{{ attempt.student.full_name }} ({{ attempt.student.usn }})</h3>
+<p class="text-muted">{{ attempt.quiz.title }}</p>
+<p>
+    Score: <strong>{{ attempt.score }} / {{ attempt.total_marks }}</strong>
+    ({{ attempt.percentage }}%) &middot;
+    Correct: {{ attempt.correct_count }} &middot; Wrong: {{ attempt.wrong_count }} &middot;
+    Submitted: {{ attempt.submitted_at.strftime('%d %b %Y, %H:%M') if attempt.submitted_at }}
+</p>
+
+{% for row in rows %}
+<div class="quiz-question">
+    <p class="fw-semibold">{{ loop.index }}. {{ row.question.question_text }}
+        <span class="badge bg-light text-dark border">{{ row.question.topic }}</span>
+    </p>
+    {% for letter, text in [('A', row.question.option_a), ('B', row.question.option_b), ('C', row.question.option_c), ('D', row.question.option_d)] %}
+        <p class="mb-1
+            {% if letter == row.question.correct_option %}text-success fw-bold{% endif %}
+            {% if letter == row.selected and letter != row.question.correct_option %}text-danger fw-bold{% endif %}">
+            {{ letter }}. {{ text }}
+            {% if letter == row.question.correct_option %} &check; correct answer{% endif %}
+            {% if letter == row.selected and letter != row.question.correct_option %} &cross; student's answer{% endif %}
+        </p>
+    {% endfor %}
+    {% if not row.selected %}<p class="text-muted small">No answer submitted for this question.</p>{% endif %}
+</div>
+{% endfor %}
+
+<a href="{{ url_for('teacher.quiz_dashboard', quiz_id=attempt.quiz.id) }}" class="btn btn-outline-secondary">Back to Dashboard</a>
+{% endblock %}

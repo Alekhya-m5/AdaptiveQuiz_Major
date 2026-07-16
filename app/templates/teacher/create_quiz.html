@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Create Quiz{% endblock %}
+{% block content %}
+<h3>Create Quiz</h3>
+<p class="text-muted">Manually enter each question, four options, the correct answer, a concept tag and a topic. Difficulty is optional. No AI is used to generate questions.</p>
+
+<form method="POST" id="quiz-form">
+    <div class="row mb-3">
+        <div class="col-md-8">
+            <label class="form-label">Quiz Title</label>
+            <input type="text" name="title" class="form-control" required placeholder="e.g. Quiz 1">
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Course</label>
+            <select name="course" class="form-select">
+                {% for c in courses %}
+                    <option value="{{ c }}">{{ c }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <div id="questions-container"></div>
+
+    <button type="button" id="add-question-btn" class="btn btn-outline-primary mb-3">+ Add Question</button>
+    <br>
+    <button type="submit" class="btn btn-success">Save Quiz as Draft</button>
+</form>
+
+<template id="question-template">
+    <div class="question-block">
+        <div class="d-flex justify-content-between">
+            <h6>Question <span class="q-number"></span></h6>
+            <button type="button" class="btn btn-sm btn-outline-danger remove-question-btn">Remove</button>
+        </div>
+        <div class="mb-2">
+            <label class="form-label">Question Text</label>
+            <textarea name="question_text[]" class="form-control" rows="2" required></textarea>
+        </div>
+        <div class="row">
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Option A</label>
+                <input type="text" name="option_a[]" class="form-control" required>
+            </div>
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Option B</label>
+                <input type="text" name="option_b[]" class="form-control" required>
+            </div>
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Option C</label>
+                <input type="text" name="option_c[]" class="form-control" required>
+            </div>
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Option D</label>
+                <input type="text" name="option_d[]" class="form-control" required>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-3 mb-2">
+                <label class="form-label">Correct Option</label>
+                <select name="correct_option[]" class="form-select" required>
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                    <option value="D">D</option>
+                </select>
+            </div>
+            <div class="col-md-6 mb-2">
+                <label class="form-label">Topic</label>
+                <input type="text" name="topic[]" class="form-control" required placeholder="e.g. Research Design">
+            </div>
+            <div class="col-md-2 mb-2">
+                <label class="form-label">Difficulty (optional)</label>
+                <select name="difficulty[]" class="form-select">
+                    <option value="">--</option>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
+                </select>
+            </div>
+            <div class="col-md-1 mb-2">
+                <label class="form-label">Marks</label>
+                <input type="number" name="marks[]" class="form-control" value="1" min="0" step="0.5">
+            </div>
+        </div>
+    </div>
+</template>
+
+<script>
+const container = document.getElementById('questions-container');
+const template = document.getElementById('question-template');
+const addBtn = document.getElementById('add-question-btn');
+
+function renumber() {
+    container.querySelectorAll('.question-block').forEach((block, idx) => {
+        block.querySelector('.q-number').textContent = idx + 1;
+    });
+}
+
+function addQuestion() {
+    const clone = template.content.cloneNode(true);
+    clone.querySelector('.remove-question-btn').addEventListener('click', (e) => {
+        const blocks = container.querySelectorAll('.question-block');
+        if (blocks.length <= 1) {
+            alert('A quiz needs at least one question.');
+            return;
+        }
+        e.target.closest('.question-block').remove();
+        renumber();
+    });
+    container.appendChild(clone);
+    renumber();
+}
+
+addBtn.addEventListener('click', addQuestion);
+
+// Start with one question block by default
+addQuestion();
+
+document.getElementById('quiz-form').addEventListener('submit', (e) => {
+    if (container.querySelectorAll('.question-block').length === 0) {
+        e.preventDefault();
+        alert('Add at least one question before saving.');
+    }
+});
+</script>
+{% endblock %}

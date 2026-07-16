@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ quiz.title }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start">
+    <div>
+        <h3>{{ quiz.title }}</h3>
+        <p class="text-muted">
+            Course: {{ quiz.course }} &middot;
+            {{ quiz.questions|length }} questions &middot;
+            {{ quiz.total_marks }} marks total &middot;
+            {% if quiz.is_published %}
+                <span class="badge bg-success">Published</span>
+            {% else %}
+                <span class="badge bg-secondary">Draft</span>
+            {% endif %}
+        </p>
+    </div>
+    <div class="text-end">
+        {% if not quiz.is_published %}
+        <form method="POST" action="{{ url_for('teacher.publish_quiz', quiz_id=quiz.id) }}" onsubmit="return confirm('Publish this quiz? Students will be able to take it immediately and it can no longer be edited.');">
+            <button type="submit" class="btn btn-success">Publish Quiz</button>
+        </form>
+        {% else %}
+        <a class="btn btn-primary" href="{{ url_for('teacher.quiz_dashboard', quiz_id=quiz.id) }}">View Results Dashboard</a>
+        <a class="btn btn-outline-primary" href="{{ url_for('teacher.download_report', quiz_id=quiz.id) }}">Download CSV Report</a>
+        <p class="text-muted small mt-1">{{ attempt_count }} student(s) have attempted this quiz.</p>
+        {% endif %}
+    </div>
+</div>
+
+<hr>
+
+{% for q in quiz.questions %}
+<div class="quiz-question">
+    <p class="fw-semibold">{{ loop.index }}. {{ q.question_text }} <span class="text-muted small">({{ q.marks }} mark{{ 's' if q.marks != 1 }})</span></p>
+    <p class="mb-1">A. {{ q.option_a }}</p>
+    <p class="mb-1">B. {{ q.option_b }}</p>
+    <p class="mb-1">C. {{ q.option_c }}</p>
+    <p class="mb-1">D. {{ q.option_d }}</p>
+    <p class="text-success mb-1">Correct: {{ q.correct_option }}</p>
+    <p class="text-muted small mb-0">
+        Topic: {{ q.topic }}
+        {% if q.difficulty %} &middot; Difficulty: {{ q.difficulty }}{% endif %}
+    </p>
+</div>
+{% endfor %}
+
+<a href="{{ url_for('teacher.dashboard') }}" class="btn btn-outline-secondary">Back to Dashboard</a>
+{% endblock %}

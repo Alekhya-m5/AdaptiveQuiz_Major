@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-8">
+        <h1 class="text-center mb-4">Classical Assessment System</h1>
+        <p class="text-center text-muted mb-5">Choose your role to continue</p>
+        <div class="row g-4">
+            <div class="col-md-6">
+                <div class="card p-4 text-center h-100">
+                    <h4>Student</h4>
+                    <p class="text-muted">Take quizzes and view your results.</p>
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('student.login') }}" class="btn btn-primary">Student Login</a>
+                        <a href="{{ url_for('student.register') }}" class="btn btn-outline-primary">Student Register</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card p-4 text-center h-100">
+                    <h4>Teacher</h4>
+                    <p class="text-muted">Create quizzes and download reports.</p>
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('teacher.login') }}" class="btn btn-success">Teacher Login</a>
+                        <a href="{{ url_for('teacher.register') }}" class="btn btn-outline-success">Teacher Register</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

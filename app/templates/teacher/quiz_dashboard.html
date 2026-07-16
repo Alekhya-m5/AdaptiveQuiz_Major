@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}{{ quiz.title }} - Results Dashboard{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+        <h3>{{ quiz.title }} &mdash; Results Dashboard</h3>
+        <p class="text-muted mb-0">Course: {{ quiz.course }} &middot; {{ quiz.questions|length }} questions &middot; {{ quiz.total_marks }} marks total</p>
+    </div>
+    <div>
+        <a class="btn btn-outline-primary" href="{{ url_for('teacher.download_report', quiz_id=quiz.id) }}">Download CSV Report</a>
+        <a class="btn btn-outline-secondary" href="{{ url_for('teacher.quiz_detail', quiz_id=quiz.id) }}">Back to Quiz</a>
+    </div>
+</div>
+
+<hr>
+
+{% if summary.total_attempts == 0 %}
+<div class="alert alert-info">No students have attempted this quiz yet. The dashboard will populate as submissions come in.</div>
+{% else %}
+
+<!-- Summary cards -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card p-3 text-center h-100">
+            <div class="text-muted small">Attempts</div>
+            <div class="fs-3 fw-bold">{{ summary.total_attempts }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card p-3 text-center h-100">
+            <div class="text-muted small">Average Score</div>
+            <div class="fs-3 fw-bold">{{ summary.average_percentage }}%</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card p-3 text-center h-100">
+            <div class="text-muted small">Highest</div>
+            <div class="fs-3 fw-bold text-success">{{ summary.highest_percentage }}%</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card p-3 text-center h-100">
+            <div class="text-muted small">Lowest</div>
+            <div class="fs-3 fw-bold text-danger">{{ summary.lowest_percentage }}%</div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts -->
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card p-3 h-100">
+            <h6>Score Distribution</h6>
+            <canvas id="distributionChart" height="220"></canvas>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card p-3 h-100">
+            <h6>Accuracy by Topic</h6>
+            <canvas id="topicChart" height="220"></canvas>
+        </div>
+    </div>
+    <div class="col-12">
+        <div class="card p-3">
+            <h6>Accuracy by Question <span class="text-muted small">(hover a bar to see the question text)</span></h6>
+            <canvas id="questionChart" height="120"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Student attempts table -->
+<div class="card p-3 mb-4">
+    <h6>Student Attempts</h6>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>USN</th>
+                    <th>Name</th>
+                    <th>Score</th>
+                    <th>Percentage</th>
+                    <th>Correct</th>
+                    <th>Wrong</th>
+                    <th>Submitted</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in attempts %}
+                <tr>
+                    <td>{{ a.student.usn }}</td>
+                    <td>{{ a.student.full_name }}</td>
+                    <td>{{ a.score }} / {{ a.total_marks }}</td>
+                    <td>
+                        <div class="d-flex align-items-center gap-2" style="min-width:140px;">
+                            <div class="progress flex-grow-1" style="height:8px;">
+                                <div class="progress-bar {% if a.percentage >= 60 %}bg-success{% elif a.percentage >= 40 %}bg-warning{% else %}bg-danger{% endif %}"
+                                     style="width: {{ a.percentage }}%;"></div>
+                            </div>
+                            <span class="small">{{ a.percentage }}%</span>
+                        </div>
+                    </td>
+                    <td><span class="badge bg-success">{{ a.correct_count }}</span></td>
+                    <td><span class="badge bg-danger">{{ a.wrong_count }}</span></td>
+                    <td>{{ a.submitted_at.strftime('%d %b %Y, %H:%M') if a.submitted_at }}</td>
+                    <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('teacher.view_attempt', attempt_id=a.id) }}">View Answers</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+const distributionData = {{ buckets | tojson }};
+const topicStats = {{ topic_stats | tojson }};
+const questionStats = {{ question_stats | tojson }};
+
+new Chart(document.getElementById('distributionChart'), {
+    type: 'bar',
+    data: {
+        labels: Object.keys(distributionData),
+        datasets: [{
+            label: 'Students',
+            data: Object.values(distributionData),
+            backgroundColor: '#0d6efd'
+        }]
+    },
+    options: {
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+    }
+});
+
+new Chart(document.getElementById('topicChart'), {
+    type: 'doughnut',
+    data: {
+        labels: topicStats.map(t => t.topic),
+        datasets: [{
+            data: topicStats.map(t => t.accuracy),
+            backgroundColor: ['#0d6efd', '#20c997', '#ffc107', '#fd7e14', '#dc3545', '#6f42c1', '#0dcaf0', '#6c757d']
+        }]
+    },
+    options: {
+        plugins: {
+            tooltip: {
+                callbacks: {
+                    label: (ctx) => `${ctx.label}: ${ctx.raw}% accuracy`
+                }
+            }
+        }
+    }
+});
+
+new Chart(document.getElementById('questionChart'), {
+    type: 'bar',
+    data: {
+        labels: questionStats.map(q => q.label),
+        datasets: [{
+            label: 'Accuracy %',
+            data: questionStats.map(q => q.accuracy),
+            backgroundColor: questionStats.map(q => q.accuracy >= 60 ? '#198754' : q.accuracy >= 40 ? '#ffc107' : '#dc3545')
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    label: (ctx) => {
+                        const q = questionStats[ctx.dataIndex];
+                        return [`Accuracy: ${q.accuracy}% (${q.correct}/${q.total})`, `Topic: ${q.topic}`];
+                    },
+                    title: (items) => questionStats[items[0].dataIndex].text
+                }
+            }
+        },
+        scales: { x: { beginAtZero: true, max: 100 } }
+    }
+});
+</script>
+
+{% endif %}
+{% endblock %}

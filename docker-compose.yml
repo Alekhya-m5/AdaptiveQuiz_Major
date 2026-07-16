@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  quiz-system:
+    build: .
+    container_name: classical_assessment_system
+    ports:
+      - "5000:5000"
+    environment:
+      - SECRET_KEY=change-this-in-production
+      - DATABASE_URL=sqlite:////app/instance/quiz_system.db
+    volumes:
+      - quiz_data:/app/instance
+    restart: unless-stopped
+
+volumes:
+  quiz_data:

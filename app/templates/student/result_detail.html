@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Result Detail{% endblock %}
+{% block content %}
+<h3>{{ attempt.quiz.title }} - Result</h3>
+<p>
+    Score: <strong>{{ attempt.score }} / {{ attempt.total_marks }}</strong>
+    ({{ attempt.percentage }}%) &middot;
+    Correct: {{ attempt.correct_count }} &middot; Wrong: {{ attempt.wrong_count }}
+</p>
+
+{% for row in rows %}
+<div class="quiz-question">
+    <p class="fw-semibold">{{ loop.index }}. {{ row.question.question_text }}</p>
+    {% for letter, text in [('A', row.question.option_a), ('B', row.question.option_b), ('C', row.question.option_c), ('D', row.question.option_d)] %}
+        <p class="mb-1
+            {% if letter == row.question.correct_option %}text-success fw-bold{% endif %}
+            {% if letter == row.selected and letter != row.question.correct_option %}text-danger fw-bold{% endif %}">
+            {{ letter }}. {{ text }}
+            {% if letter == row.question.correct_option %} &check; correct answer{% endif %}
+            {% if letter == row.selected and letter != row.question.correct_option %} &cross; your answer{% endif %}
+        </p>
+    {% endfor %}
+</div>
+{% endfor %}
+
+<a href="{{ url_for('student.results') }}" class="btn btn-outline-secondary">Back to My Results</a>
+{% endblock %}

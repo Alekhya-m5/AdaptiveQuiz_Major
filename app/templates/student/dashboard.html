@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Student Dashboard{% endblock %}
+{% block content %}
+<h3>Welcome, {{ student.full_name }} ({{ student.usn }})</h3>
+<p class="text-muted">Course: <span class="badge bg-secondary">{{ student.course }}</span></p>
+
+<h5 class="mt-4">Available Quizzes</h5>
+{% if quizzes %}
+<div class="row g-3">
+    {% for quiz in quizzes %}
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h5>{{ quiz.title }}</h5>
+            <p class="text-muted mb-2">{{ quiz.questions|length }} questions &middot; {{ quiz.total_marks }} marks</p>
+            {% if quiz.id in attempted_quiz_ids %}
+                <span class="badge bg-success mb-2 align-self-start">Completed</span>
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('student.results') }}">View Result</a>
+            {% else %}
+                <a class="btn btn-primary btn-sm" href="{{ url_for('student.take_quiz', quiz_id=quiz.id) }}">Take Quiz</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">No quizzes published for your course yet. Check back later.</p>
+{% endif %}
+{% endblock %}
