@@ -61,28 +61,7 @@ at `instance/quiz_system.db` on first run.
    `USN, Student Name, Quiz ID, Question ID, Selected Option, Correct Option,
    Correct/Incorrect, Concept Tag, Topic, Marks, Final Score, Timestamp`
 
-## Database design (why it's future-proof for IRT/BKT)
 
-- `responses` is the single table Phase 2 needs. Every row is one
-  (student, question) answer event with correctness, marks, and a
-  **snapshotted** `concept_tag`/`topic` (captured at answer time, not looked
-  up live). This means:
-  - **IRT** can fit item parameters straight off `questions` + `responses`
-    (an item-response matrix falls out of a single join).
-  - **BKT** can build a per-student, per-concept time series straight off
-    `responses.timestamp` + `responses.concept_tag`, ordered chronologically,
-    without touching `questions` at all — so it stays correct even if a
-    question's tag is edited later on an unrelated draft quiz.
-  - The `difficulty` column on `questions` already exists (optional today) as
-    a home for calibrated IRT difficulty values later, without a schema
-    change.
-- Quizzes are immutable once published (no edit route exists post-publish),
-  so a report generated today and one generated a year from now for the same
-  quiz will always agree.
-- One `Attempt` per (student, quiz) is enforced with a unique constraint —
-  intentional for the classical module (single fixed quiz, single attempt).
-  Phase 2 can relax this later if adaptive re-attempts are introduced; it
-  only requires dropping a constraint, not a redesign.
 
 ## Explicitly NOT implemented (belongs to Phase 2)
 
