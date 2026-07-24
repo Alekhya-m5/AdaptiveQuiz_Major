@@ -1,90 +1,231 @@
 # Classical Assessment Module (Phase 1)
 
-A working, deployment-ready quiz system with **Teacher** and **Student** roles.
-This is the *classical* assessment module only — it collects clean, structured
-quiz-attempt data. There is no adaptive engine, no AI-generated questions, no
-theta/mastery/ability scoring, and no LLM usage anywhere in this codebase.
-That is intentionally left for Phase 2, which will read from this database.
+A deployment-ready quiz system with **Teacher** and **Student** roles.
 
-## What's included
+This project implements the **Classical Assessment Module** for an adaptive learning platform. It collects structured quiz-attempt data that will later be used by the adaptive engine in Phase 2.
 
-- Student registration/login (USN + password), course selection (currently
-  only "RM"), quiz taking, and a personal result history.
-- Teacher registration/login (Teacher ID + password), manual quiz creation
-  (question, 4 options, correct answer, concept tag, topic, optional
-  difficulty, marks), draft/publish workflow, and a CSV log-report download
-  per quiz.
-- Automatic grading on submission (score, percentage, correct/wrong counts).
-- A schema (see "Database design" below) that Phase 2 (IRT / BKT / adaptive
-  engine) can consume directly without any migration.
+The project currently focuses only on quiz management, quiz attempts, grading, and data collection.
 
-## Running with Docker (recommended)
+---
 
-```bash
-docker compose up --build
+# Features
+
+## Student
+
+- Student registration and login
+- Course selection (currently RM)
+- View available quizzes
+- Attempt each quiz once
+- Automatic evaluation
+- View quiz history and results
+
+## Teacher
+
+- Teacher registration and login
+- Create quizzes manually
+- Add questions with:
+  - Question
+  - Four options
+  - Correct answer
+  - Concept tag
+  - Topic
+  - Difficulty (optional)
+  - Marks
+- Save quizzes as Draft
+- Publish quizzes
+- Download student attempt reports in CSV format
+
+## Automatic Grading
+
+After quiz submission, the system automatically calculates:
+
+- Score
+- Percentage
+- Number of correct answers
+- Number of wrong answers
+
+---
+
+# Technology Stack
+
+- Python
+- Flask
+- Flask-SQLAlchemy
+- PostgreSQL (Supabase)
+- HTML
+- CSS
+- Jinja2
+
+---
+
+# Database
+
+The project now uses a shared **Supabase PostgreSQL** database instead of SQLite.
+
+The schema is designed so that future adaptive modules (IRT, BKT, Adaptive Quiz Engine) can directly consume the stored quiz attempt data without requiring database migration.
+
+---
+
+# Project Structure
+
+```text
+AdaptiveQuiz/
+│
+├── app/
+│   ├── __init__.py
+│   ├── auth.py
+│   ├── models.py
+│   ├── routes_common.py
+│   ├── routes_student.py
+│   ├── routes_teacher.py
+│   ├── static/
+│   └── templates/
+│
+├── run.py
+├── requirements.txt
+├── .env.example
+├── README.md
+└── .gitignore
 ```
 
-Then open **http://localhost:5000**. Data persists in a Docker volume
-(`quiz_data`) across restarts.
+---
 
-To stop: `docker compose down` (add `-v` to also wipe the database volume).
+# Installation
 
-## Running locally without Docker
+## 1. Clone the repository
+
+```bash
+git clone <repository-url>
+cd AdaptiveQuiz
+```
+
+---
+
+## 2. Create a virtual environment
+
+macOS/Linux
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+Windows
 
 ```bash
 python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+venv\Scripts\activate
+```
+
+---
+
+## 3. Install dependencies
+
+```bash
 pip install -r requirements.txt
+```
+
+---
+
+## 4. Configure Environment Variables
+
+Copy the example file.
+
+macOS/Linux
+
+```bash
+cp .env.example .env
+```
+
+Windows
+
+```cmd
+copy .env.example .env
+```
+
+Edit `.env` and update the following values.
+
+```env
+SECRET_KEY=your-secret-key
+
+DATABASE_URL=postgresql+psycopg2://postgres.<project-ref>:YOUR_DATABASE_PASSWORD@aws-1-ap-south-1.pooler.supabase.com:5432/postgres
+```
+
+Replace:
+
+- `YOUR_DATABASE_PASSWORD` with the shared Supabase database password.
+
+---
+
+## 5. Run the application
+
+```bash
 python run.py
 ```
 
-Open **http://localhost:5000**. The SQLite database is created automatically
-at `instance/quiz_system.db` on first run.
-
-## How to use it
-
-1. Go to **Teacher Register**, create a teacher account, log in.
-2. Click **Create Quiz** → give it a title (e.g. "Quiz 1"), pick the course
-   (RM), add one or more questions manually (question text, 4 options,
-   correct option, concept tag, topic, optional difficulty, marks) → **Save
-   Quiz as Draft**.
-3. On the quiz's manage page, click **Publish Quiz**. Once published, a quiz
-   is locked — it can no longer be edited, only reported on — so that
-   historical data always matches what students actually saw.
-4. Go to **Student Register**, create a student account with a USN, choose
-   course RM, log in.
-5. The student dashboard lists every published quiz for their course. They
-   take a quiz once (one attempt per student per quiz is enforced at the
-   database level) and immediately see their score.
-6. Back on the teacher's quiz page, **Download CSV Report** produces a row
-   per (student, question) pair with:
-   `USN, Student Name, Quiz ID, Question ID, Selected Option, Correct Option,
-   Correct/Incorrect, Concept Tag, Topic, Marks, Final Score, Timestamp`
-
-
-
-## Explicitly NOT implemented (belongs to Phase 2)
-
-Theta / ability estimation, knowledge tracing, mastery scores, adaptive
-question selection, weak-topic detection, LLM-generated questions,
-OpenRouter, semantic retrieval, OCR, embeddings.
-
-## Project structure
+Open:
 
 ```
-quiz_system/
-├── app/
-│   ├── __init__.py          # app factory
-│   ├── models.py            # SQLAlchemy models
-│   ├── auth.py               # login-required decorators
-│   ├── routes_common.py      # landing page, logout
-│   ├── routes_student.py     # student register/login/dashboard/quiz/results
-│   ├── routes_teacher.py     # teacher register/login/dashboard/quiz CRUD/report
-│   ├── templates/
-│   └── static/css/style.css
-├── run.py
-├── requirements.txt
-├── Dockerfile
-├── docker-compose.yml
-└── README.md
+http://localhost:5000
 ```
+
+---
+
+# Usage
+
+### Teacher
+
+1. Register as a teacher.
+2. Log in.
+3. Create a quiz.
+4. Add questions.
+5. Save as Draft.
+6. Publish the quiz.
+7. Download quiz reports as CSV.
+
+### Student
+
+1. Register as a student.
+2. Log in.
+3. Attempt available quizzes.
+4. View quiz results.
+
+---
+
+# CSV Report
+
+Teachers can download reports containing:
+
+- Student USN
+- Student Name
+- Quiz ID
+- Question ID
+- Selected Option
+- Correct Option
+- Correct/Incorrect
+- Concept Tag
+- Topic
+- Marks
+- Final Score
+- Timestamp
+
+---
+
+# Phase 2 (Future Work)
+
+The following modules will be integrated in the next phase:
+
+- Item Response Theory (IRT)
+- Bayesian Knowledge Tracing (BKT)
+- Adaptive Quiz Generation
+- Ability (Theta) Estimation
+- Mastery Prediction
+- Personalized Learning Path
+- AI-powered Question Generation
+- Weak Topic Detection
+
+---
+
+# Contributors
+
+Developed as part of the Adaptive Learning Platform project.
