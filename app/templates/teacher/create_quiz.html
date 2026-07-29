@@ -70,14 +70,25 @@
                 <input type="text" name="topic[]" class="form-control" required placeholder="e.g. Research Design">
             </div>
             <div class="col-md-2 mb-2">
-                <label class="form-label">Difficulty (optional)</label>
-                <select name="difficulty[]" class="form-select">
-                    <option value="">--</option>
-                    <option value="Easy">Easy</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Hard">Hard</option>
-                </select>
-            </div>
+    <label class="form-label">Bloom's Level</label>
+    <select name="blooms_level[]" class="form-select" required>
+        <option value="" selected disabled>Select</option>
+        <option value="Understand">Understand</option>
+        <option value="Apply">Apply</option>
+        <option value="Evaluate">Analyze</option>
+    </select>
+</div>
+
+<div class="col-md-2 mb-2">
+    <label class="form-label">Difficulty</label>
+    <select name="difficulty[]" class="form-select" required>
+        <option value="" selected disabled>Select</option>
+        <option value="Easy">Easy</option>
+        <option value="Medium">Medium</option>
+        <option value="Hard">Hard</option>
+    </select>
+</div>
+
             <div class="col-md-1 mb-2">
                 <label class="form-label">Marks</label>
                 <input type="number" name="marks[]" class="form-control" value="1" min="0" step="0.5">
