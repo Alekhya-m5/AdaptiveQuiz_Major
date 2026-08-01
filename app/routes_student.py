@@ -1,7 +1,10 @@
 from datetime import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, abort
-from .models import db, Student, Quiz, Question, Attempt, Response
+from .models import StudentTheta, db, Student, Quiz, Question, Attempt, Response
 from .auth import student_required
+from app.irt.service import IRTService
+from app.models import StudentTheta
+
 
 student_bp = Blueprint("student", __name__)
 
@@ -139,6 +142,7 @@ def take_quiz(quiz_id):
 
         db.session.commit()
         flash("Quiz submitted successfully.", "success")
+        IRTService.update_student_theta(attempt.id)
         return redirect(url_for("student.result_detail", attempt_id=attempt.id))
 
     return render_template("student/take_quiz.html", quiz=quiz, student=student)
@@ -158,6 +162,8 @@ def results():
     best_percentage = max((a.percentage for a in attempts), default=0)
     total_correct = sum(a.correct_count for a in attempts)
     total_wrong = sum(a.wrong_count for a in attempts)
+    theta_record = StudentTheta.query.filter_by(usn=session["user_id"]).first()
+    theta = theta_record.theta if theta_record else 0.0
 
     return render_template(
         "student/results.html",
@@ -167,6 +173,7 @@ def results():
         best_percentage=best_percentage,
         total_correct=total_correct,
         total_wrong=total_wrong,
+        theta=theta
     )
 
 

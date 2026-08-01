@@ -106,7 +106,8 @@ class Question(db.Model):
     correct_option = db.Column(db.String(1), nullable=False)  # 'A' | 'B' | 'C' | 'D'
     concept_tag = db.Column(db.String(120), nullable=False)
     topic = db.Column(db.String(120), nullable=False)
-    difficulty = db.Column(db.String(20), nullable=True)  # optional: Easy/Medium/Hard
+    difficulty = db.Column(db.String(20), nullable=False)  # optional: Easy/Medium/Hard
+    difficulty_value = db.Column(db.Float, default=0.0, nullable=False)
     marks = db.Column(db.Float, default=1.0, nullable=False)
 
     responses = db.relationship("Response", backref="question", lazy=True)
@@ -155,3 +156,25 @@ class Response(db.Model):
     concept_tag = db.Column(db.String(120))  # snapshot at answer-time
     topic = db.Column(db.String(120))        # snapshot at answer-time
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class StudentTheta(db.Model):
+    __tablename__ = "student_theta"
+
+    usn = db.Column(
+        db.String(30),
+        db.ForeignKey("students.usn"),
+        primary_key=True
+    )
+
+    theta = db.Column(db.Float, default=0.0)
+
+    quizzes_attempted = db.Column(db.Integer, default=0)
+
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )
+
+    student = db.relationship("Student", backref="theta_record")

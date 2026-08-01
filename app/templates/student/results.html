@@ -1,59 +1,90 @@
 {% extends "base.html" %}
 {% block title %}My Results{% endblock %}
+
 {% block content %}
-<h3>My Results</h3>
+<h3 class="mb-4">My Results</h3>
 
 {% if attempts %}
 
-<!-- Summary cards -->
+<!-- Summary Cards -->
 <div class="row g-3 mb-4">
-    <div class="col-6 col-md-3">
-        <div class="card p-3 text-center h-100">
+
+    <!-- Quizzes Taken -->
+    <div class="col-6 col-lg">
+        <div class="card p-3 text-center h-100 shadow-sm">
             <div class="text-muted small">Quizzes Taken</div>
             <div class="fs-3 fw-bold">{{ attempts|length }}</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="card p-3 text-center h-100">
+
+    <!-- Average Score -->
+    <div class="col-6 col-lg">
+        <div class="card p-3 text-center h-100 shadow-sm">
             <div class="text-muted small">Average Score</div>
             <div class="fs-3 fw-bold">{{ average_percentage }}%</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="card p-3 text-center h-100">
+
+    <!-- Best Score -->
+    <div class="col-6 col-lg">
+        <div class="card p-3 text-center h-100 shadow-sm">
             <div class="text-muted small">Best Score</div>
             <div class="fs-3 fw-bold text-success">{{ best_percentage }}%</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="card p-3 text-center h-100">
-            <div class="text-muted small">Total Correct / Wrong</div>
-            <div class="fs-5 fw-bold"><span class="text-success">{{ total_correct }}</span> / <span class="text-danger">{{ total_wrong }}</span></div>
+
+    <!-- Correct / Wrong -->
+    <div class="col-6 col-lg">
+        <div class="card p-3 text-center h-100 shadow-sm">
+            <div class="text-muted small">Correct / Wrong</div>
+            <div class="fs-4 fw-bold">
+                <span class="text-success">{{ total_correct }}</span>
+                /
+                <span class="text-danger">{{ total_wrong }}</span>
+            </div>
         </div>
     </div>
-</div>
 
-<!-- Charts -->
-<div class="row g-3 mb-4">
+    <!-- Current Theta -->
+    <div class="col-6 col-lg">
+        <div class="card p-3 text-center h-100 shadow-sm border-primary">
+            <div class="text-muted small">Current Ability (θ)</div>
+            <div class="fs-3 fw-bold text-primary">
+                {{ "%.2f"|format(theta) }}
+            </div>
+        </div>
+    </div>
+
+</div>
+<div class="row">
+    <!-- Score Chart -->
     <div class="col-md-8">
-        <div class="card p-3 h-100">
-            <h6>Score by Quiz</h6>
+        <div class="card p-3 h-100 shadow-sm">
+            <h6 class="mb-3">Score by Quiz</h6>
             <canvas id="scoreChart" height="180"></canvas>
         </div>
     </div>
+
+    <!-- Correct/Wrong Chart -->
     <div class="col-md-4">
-        <div class="card p-3 h-100">
-            <h6>Overall Correct vs Wrong</h6>
+        <div class="card p-3 h-100 shadow-sm">
+            <h6 class="mb-3">Overall Correct vs Wrong</h6>
             <canvas id="correctChart" height="180"></canvas>
         </div>
     </div>
+
 </div>
 
-<!-- Results table (as requested) -->
-<div class="card p-3">
+<!-- Results Table -->
+<div class="card shadow-sm">
+    <div class="card-header">
+        <strong>Quiz History</strong>
+    </div>
+
     <div class="table-responsive">
-        <table class="table table-bordered bg-white mb-0">
-            <thead>
+        <table class="table table-bordered table-hover align-middle mb-0">
+
+            <thead class="table-light">
                 <tr>
                     <th>Quiz</th>
                     <th>Score</th>
@@ -61,60 +92,146 @@
                     <th>Correct</th>
                     <th>Wrong</th>
                     <th>Submitted</th>
-                    <th></th>
+                    <th width="100">Action</th>
                 </tr>
             </thead>
+
             <tbody>
-                {% for a in attempts %}
+
+            {% for a in attempts %}
                 <tr>
+
                     <td>{{ a.quiz.title }}</td>
+
                     <td>{{ a.score }} / {{ a.total_marks }}</td>
-                    <td>{{ a.percentage }}%</td>
-                    <td>{{ a.correct_count }}</td>
-                    <td>{{ a.wrong_count }}</td>
-                    <td>{{ a.submitted_at.strftime('%d %b %Y, %H:%M') if a.submitted_at }}</td>
-                    <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('student.result_detail', attempt_id=a.id) }}">Details</a></td>
+
+                    <td>
+                        <span class="fw-bold
+                        {% if a.percentage >= 80 %}
+                            text-success
+                        {% elif a.percentage >= 50 %}
+                            text-warning
+                        {% else %}
+                            text-danger
+                        {% endif %}
+                        ">
+                            {{ a.percentage }}%
+                        </span>
+                    </td>
+
+                    <td class="text-success fw-bold">
+                        {{ a.correct_count }}
+                    </td>
+
+                    <td class="text-danger fw-bold">
+                        {{ a.wrong_count }}
+                    </td>
+
+                    <td>
+                        {% if a.submitted_at %}
+                            {{ a.submitted_at.strftime('%d %b %Y, %H:%M') }}
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <a class="btn btn-sm btn-outline-primary"
+                           href="{{ url_for('student.result_detail', attempt_id=a.id) }}">
+                            Details
+                        </a>
+                    </td>
+
                 </tr>
-                {% endfor %}
+            {% endfor %}
+
             </tbody>
+
         </table>
     </div>
 </div>
 
+<!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
 <script>
+
 const quizLabels = {{ attempts | map(attribute='quiz.title') | list | tojson }};
 const percentages = {{ attempts | map(attribute='percentage') | list | tojson }};
 
 new Chart(document.getElementById('scoreChart'), {
+
     type: 'bar',
+
     data: {
+
         labels: quizLabels,
+
         datasets: [{
             label: 'Percentage',
+
             data: percentages,
-            backgroundColor: percentages.map(p => p >= 60 ? '#198754' : p >= 40 ? '#ffc107' : '#dc3545')
+
+            backgroundColor: percentages.map(p =>
+                p >= 60
+                ? '#198754'
+                : p >= 40
+                ? '#ffc107'
+                : '#dc3545'
+            )
+
         }]
     },
+
     options: {
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true, max: 100 } }
+
+        responsive: true,
+
+        plugins: {
+            legend: {
+                display: false
+            }
+        },
+
+        scales: {
+            y: {
+                beginAtZero: true,
+                max: 100
+            }
+        }
     }
+
 });
 
+
 new Chart(document.getElementById('correctChart'), {
+
     type: 'doughnut',
+
     data: {
+
         labels: ['Correct', 'Wrong'],
+
         datasets: [{
+
             data: [{{ total_correct }}, {{ total_wrong }}],
-            backgroundColor: ['#198754', '#dc3545']
+
+            backgroundColor: [
+                '#198754',
+                '#dc3545'
+            ]
+
         }]
     }
+
 });
+
 </script>
 
 {% else %}
-<p class="text-muted">You haven't attempted any quiz yet.</p>
+
+<div class="alert alert-secondary">
+    You haven't attempted any quiz yet.
+</div>
+
 {% endif %}
+
 {% endblock %}

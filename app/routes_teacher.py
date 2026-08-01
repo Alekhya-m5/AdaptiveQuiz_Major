@@ -8,6 +8,8 @@ from flask import (
 from .models import db, Teacher, Quiz, Question, Attempt, Response
 from .auth import teacher_required
 from .routes_student import AVAILABLE_COURSES
+from app.models import StudentTheta
+
 
 teacher_bp = Blueprint("teacher", __name__)
 
@@ -171,6 +173,32 @@ def quiz_dashboard(quiz_id):
         .all()
     )
 
+
+    # -----------------------------
+    # IRT Analytics
+    # -----------------------------
+
+    theta_map = {}
+
+    theta_values = []
+
+    for attempt in attempts:
+
+        theta_record = StudentTheta.query.filter_by(
+            usn=attempt.usn
+        ).first()
+
+        theta = round(theta_record.theta, 2) if theta_record else 0.0
+
+        theta_map[attempt.usn] = theta
+
+        theta_values.append(theta)
+
+    average_theta = (
+        round(sum(theta_values) / len(theta_values), 2)
+        if theta_values else 0.0
+    )
+
     summary = {
         "total_attempts": len(attempts),
         "average_percentage": round(sum(a.percentage for a in attempts) / len(attempts), 2) if attempts else 0,
@@ -234,7 +262,10 @@ def quiz_dashboard(quiz_id):
         question_stats=question_stats,
         topic_stats=topic_stats,
         buckets=buckets,
+        theta_map=theta_map,
+        average_theta=average_theta,
     )
+    
 
 
 @teacher_bp.route("/attempt/<int:attempt_id>")
@@ -265,9 +296,18 @@ def download_report(quiz_id):
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow([
-        "USN", "Student Name", "Quiz ID", "Question ID", "Selected Option",
-        "Correct Option", "Correct/Incorrect", "Topic",
-        "Marks", "Final Score", "Timestamp",
+         "USN",
+        "Student Name",
+        "Theta",
+        "Quiz ID",
+        "Question ID",
+        "Selected Option",
+        "Correct Option",
+        "Correct/Incorrect",
+        "Topic",
+        "Marks",
+        "Final Score",
+        "Timestamp",
     ])
 
     attempts = (
@@ -277,11 +317,18 @@ def download_report(quiz_id):
     )
     for attempt in attempts:
         student = attempt.student
+        theta_record = StudentTheta.query.filter_by(
+            usn=student.usn
+        ).first()
+
+        theta = round(theta_record.theta, 2) if theta_record else 0.0
+
         for resp in sorted(attempt.responses, key=lambda r: r.question_id):
             question = resp.question
             writer.writerow([
                 student.usn,
                 student.full_name,
+                theta,
                 quiz.id,
                 question.id,
                 resp.selected_option or "",

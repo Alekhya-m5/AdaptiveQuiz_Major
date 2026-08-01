@@ -19,31 +19,50 @@
 {% else %}
 
 <!-- Summary cards -->
+<!-- Summary cards -->
 <div class="row g-3 mb-4">
-    <div class="col-6 col-md-3">
+
+    <div class="col-6 col-md">
         <div class="card p-3 text-center h-100">
             <div class="text-muted small">Attempts</div>
             <div class="fs-3 fw-bold">{{ summary.total_attempts }}</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+
+    <div class="col-6 col-md">
         <div class="card p-3 text-center h-100">
             <div class="text-muted small">Average Score</div>
             <div class="fs-3 fw-bold">{{ summary.average_percentage }}%</div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+
+    <div class="col-6 col-md">
         <div class="card p-3 text-center h-100">
             <div class="text-muted small">Highest</div>
-            <div class="fs-3 fw-bold text-success">{{ summary.highest_percentage }}%</div>
+            <div class="fs-3 fw-bold text-success">
+                {{ summary.highest_percentage }}%
+            </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+
+    <div class="col-6 col-md">
         <div class="card p-3 text-center h-100">
             <div class="text-muted small">Lowest</div>
-            <div class="fs-3 fw-bold text-danger">{{ summary.lowest_percentage }}%</div>
+            <div class="fs-3 fw-bold text-danger">
+                {{ summary.lowest_percentage }}%
+            </div>
         </div>
     </div>
+
+    <div class="col-12 col-md">
+        <div class="card p-3 text-center h-100 border-primary">
+            <div class="text-muted small">Average Theta (θ)</div>
+            <div class="fs-3 fw-bold text-primary">
+                {{ "%.2f"|format(average_theta) }}
+            </div>
+        </div>
+    </div>
+
 </div>
 
 <!-- Charts -->
@@ -77,6 +96,7 @@
                 <tr>
                     <th>USN</th>
                     <th>Name</th>
+                    <th>Theta (θ)</th>
                     <th>Score</th>
                     <th>Percentage</th>
                     <th>Correct</th>
@@ -89,7 +109,28 @@
                 {% for a in attempts %}
                 <tr>
                     <td>{{ a.student.usn }}</td>
+
                     <td>{{ a.student.full_name }}</td>
+
+                    <td>
+                    {% set theta = theta_map.get(a.usn, 0.0) %}
+
+                    <span class="badge rounded-pill
+                    {% if theta >= 1 %}
+                        bg-success
+                    {% elif theta >= 0 %}
+                        bg-primary
+                    {% else %}
+                        bg-warning text-dark
+                    {% endif %}
+                    ">
+
+                    {{ "%.2f"|format(theta) }}
+
+                    </span>
+
+                    </td>
+
                     <td>{{ a.score }} / {{ a.total_marks }}</td>
                     <td>
                         <div class="d-flex align-items-center gap-2" style="min-width:140px;">
