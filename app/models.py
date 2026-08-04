@@ -178,3 +178,35 @@ class StudentTheta(db.Model):
     )
 
     student = db.relationship("Student", backref="theta_record")
+
+class ThetaHistory(db.Model):
+    __tablename__ = "theta_history"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    usn = db.Column(
+        db.String(30),
+        db.ForeignKey("students.usn"),
+        nullable=False
+    )
+
+    attempt_id = db.Column(
+        db.Integer,
+        db.ForeignKey("attempts.id"),
+        nullable=False
+    )
+
+    question_id = db.Column(
+        db.Integer,
+        db.ForeignKey("questions.id"),
+        nullable=False
+    )
+
+    theta_before = db.Column(db.Float, nullable=False)
+
+    theta_after = db.Column(db.Float, nullable=False)
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow
+    )

@@ -9,6 +9,7 @@ from app.irt.probability import rasch_probability
 
 # Learning rate
 LEARNING_RATE = 0.10
+weight=0
 
 
 def update_theta(theta: float,
@@ -39,8 +40,13 @@ def update_theta(theta: float,
 
     # Actual outcome
     actual = 1 if is_correct else 0
+    if difficulty == -1:      # Easy
+        weight = 0.8
+    elif difficulty == 0:     # Medium
+        weight = 1.0
+    else:                     # Hard
+        weight = 1.2
 
-    # Gradient update
-    new_theta = theta + LEARNING_RATE * (actual - expected)
+    new_theta = theta + LEARNING_RATE * weight * (actual - expected)
 
     return new_theta

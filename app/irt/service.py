@@ -10,7 +10,9 @@ from app.models import (
     Response,
     Question,
     StudentTheta,
+    ThetaHistory
 )
+
 
 from app.irt.theta import update_theta
 
@@ -63,11 +65,23 @@ class IRTService:
 
             question = Question.query.get(response.question_id)
 
+            theta_before = theta
+
             theta = update_theta(
                 theta=theta,
                 difficulty=question.difficulty_value,
                 is_correct=response.is_correct
             )
+
+            history = ThetaHistory(
+                usn=usn,
+                attempt_id=attempt.id,
+                question_id=response.question_id,
+                theta_before=theta_before,
+                theta_after=theta
+            )
+
+            db.session.add(history)
 
         # -----------------------------
         # Save Updated Theta

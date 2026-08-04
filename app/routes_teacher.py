@@ -5,7 +5,7 @@ from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, session, abort, Response as FlaskResponse
 )
-from .models import db, Teacher, Quiz, Question, Attempt, Response
+from .models import ThetaHistory, db, Teacher, Quiz, Question, Attempt, Response
 from .auth import teacher_required
 from .routes_student import AVAILABLE_COURSES
 from app.models import StudentTheta
@@ -298,7 +298,8 @@ def download_report(quiz_id):
     writer.writerow([
          "USN",
         "Student Name",
-        "Theta",
+        "Theta_Before",
+        "Theta_After",
         "Quiz ID",
         "Question ID",
         "Selected Option",
@@ -325,10 +326,18 @@ def download_report(quiz_id):
 
         for resp in sorted(attempt.responses, key=lambda r: r.question_id):
             question = resp.question
+            history = ThetaHistory.query.filter_by(
+                    attempt_id=attempt.id,
+                    question_id=question.id
+            ).first()
+
+            theta_before = round(history.theta_before, 4) if history else 0.0
+            theta_after = round(history.theta_after, 4) if history else 0.0
             writer.writerow([
                 student.usn,
                 student.full_name,
-                theta,
+                theta_before,
+                theta_after,
                 quiz.id,
                 question.id,
                 resp.selected_option or "",
