@@ -210,3 +210,43 @@ class ThetaHistory(db.Model):
         db.DateTime,
         default=datetime.utcnow
     )
+class StudentMastery(db.Model):
+    __tablename__ = "student_mastery"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    usn = db.Column(
+        db.String(30),
+        db.ForeignKey("students.usn"),
+        nullable=False
+    )
+
+    concept_tag = db.Column(
+        db.String(120),
+        nullable=False
+    )
+
+    mastery = db.Column(
+        db.Float,
+        nullable=False,
+        default=0.0
+    )
+
+    attempts = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0
+    )
+
+    last_updated = db.Column(
+        db.DateTime,
+        default=datetime.utcnow
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "usn",
+            "concept_tag",
+            name="uq_student_concept"
+        ),
+    )

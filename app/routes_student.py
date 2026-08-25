@@ -4,7 +4,7 @@ from .models import StudentTheta, db, Student, Quiz, Question, Attempt, Response
 from .auth import student_required
 from app.irt.service import IRTService
 from app.models import StudentTheta
-
+from app.bkt.services import BKTService
 
 student_bp = Blueprint("student", __name__)
 
@@ -143,6 +143,7 @@ def take_quiz(quiz_id):
         db.session.commit()
         flash("Quiz submitted successfully.", "success")
         IRTService.update_student_theta(attempt.id)
+        BKTService.update_student_mastery(attempt.id)
         return redirect(url_for("student.result_detail", attempt_id=attempt.id))
 
     return render_template("student/take_quiz.html", quiz=quiz, student=student)
