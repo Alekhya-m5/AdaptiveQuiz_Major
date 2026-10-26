@@ -152,6 +152,7 @@ def take_quiz(quiz_id):
 @student_bp.route("/results")
 @student_required
 def results():
+    from app.models import StudentMastery
     student = Student.query.get_or_404(session["user_id"])
     attempts = (
         Attempt.query.filter_by(usn=student.usn)
@@ -166,6 +167,14 @@ def results():
     theta_record = StudentTheta.query.filter_by(usn=session["user_id"]).first()
     theta = theta_record.theta if theta_record else 0.0
 
+    # Fetch BKT concept mastery for this student, ordered by mastery desc
+    mastery_records = (
+        StudentMastery.query
+        .filter_by(usn=session["user_id"])
+        .order_by(StudentMastery.mastery.desc())
+        .all()
+    )
+
     return render_template(
         "student/results.html",
         student=student,
@@ -174,7 +183,8 @@ def results():
         best_percentage=best_percentage,
         total_correct=total_correct,
         total_wrong=total_wrong,
-        theta=theta
+        theta=theta,
+        mastery_records=mastery_records,
     )
 
 

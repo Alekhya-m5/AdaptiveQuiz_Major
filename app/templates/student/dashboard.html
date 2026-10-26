@@ -1,8 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Student Dashboard{% endblock %}
 {% block content %}
-<h3>Welcome, {{ student.full_name }} ({{ student.usn }})</h3>
-<p class="text-muted">Course: <span class="badge bg-secondary">{{ student.course }}</span></p>
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+        <h3 class="mb-1">Welcome, {{ student.full_name }} ({{ student.usn }})</h3>
+        <p class="text-muted mb-0">Course: <span class="badge bg-secondary">{{ student.course }}</span></p>
+    </div>
+    <a href="{{ url_for('student.results') }}" class="btn btn-outline-primary">
+        📊 View Assessment Results (IRT &amp; BKT)
+    </a>
+</div>
 
 <h5 class="mt-4">Available Quizzes</h5>
 {% if quizzes %}
