@@ -162,14 +162,18 @@ class StudentTheta(db.Model):
     __tablename__ = "student_theta"
 
     usn = db.Column(
-        db.String(30),
+        db.String(50),
         db.ForeignKey("students.usn"),
         primary_key=True
     )
 
     theta = db.Column(db.Float, default=0.0)
-
     quizzes_attempted = db.Column(db.Integer, default=0)
+    std_error = db.Column(db.Float, nullable=True)
+    responses_count = db.Column(db.Integer, default=0)
+    correct_count = db.Column(db.Integer, default=0)
+    estimation_status = db.Column(db.String(40), default="ESTIMATED")
+    metadata_json = db.Column(db.Text, nullable=True)
 
     updated_at = db.Column(
         db.DateTime,
@@ -179,13 +183,14 @@ class StudentTheta(db.Model):
 
     student = db.relationship("Student", backref="theta_record")
 
+
 class ThetaHistory(db.Model):
     __tablename__ = "theta_history"
 
     id = db.Column(db.Integer, primary_key=True)
 
     usn = db.Column(
-        db.String(30),
+        db.String(50),
         db.ForeignKey("students.usn"),
         nullable=False
     )
@@ -203,20 +208,21 @@ class ThetaHistory(db.Model):
     )
 
     theta_before = db.Column(db.Float, nullable=False)
-
     theta_after = db.Column(db.Float, nullable=False)
 
     created_at = db.Column(
         db.DateTime,
         default=datetime.utcnow
     )
+
+
 class StudentMastery(db.Model):
     __tablename__ = "student_mastery"
 
     id = db.Column(db.Integer, primary_key=True)
 
     usn = db.Column(
-        db.String(30),
+        db.String(50),
         db.ForeignKey("students.usn"),
         nullable=False
     )
@@ -238,6 +244,13 @@ class StudentMastery(db.Model):
         default=0
     )
 
+    correct_count = db.Column(db.Integer, default=0)
+    unanswered_count = db.Column(db.Integer, default=0)
+    last_p_slip = db.Column(db.Float, nullable=True)
+    last_p_guess = db.Column(db.Float, nullable=True)
+    last_p_learn = db.Column(db.Float, nullable=True)
+    metadata_json = db.Column(db.Text, nullable=True)
+
     last_updated = db.Column(
         db.DateTime,
         default=datetime.utcnow
@@ -249,4 +262,91 @@ class StudentMastery(db.Model):
             "concept_tag",
             name="uq_student_concept"
         ),
+    )
+
+
+class ImportBatch(db.Model):
+    __tablename__ = "import_batches"
+
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(255), nullable=False)
+    file_hash = db.Column(db.String(64), nullable=False, index=True)
+    status = db.Column(db.String(30), nullable=False, default="PENDING")
+    total_rows = db.Column(db.Integer, default=0)
+    valid_rows = db.Column(db.Integer, default=0)
+    error_rows = db.Column(db.Integer, default=0)
+    error_summary = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime, nullable=True)
+
+    responses = db.relationship(
+        "ImportedResponse", backref="batch", lazy=True, cascade="all, delete-orphan"
+    )
+
+
+class ImportedResponse(db.Model):
+    """
+    Imported assessment response records from external assessment CSVs.
+    Separated from manual web-quiz responses to preserve data integrity
+    and ensure IRT/BKT model calculations use strictly verified assessment records.
+    """
+    __tablename__ = "imported_responses"
+
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(db.Integer, db.ForeignKey("import_batches.id"), nullable=False, index=True)
+    student_id = db.Column(db.String(50), nullable=False, index=True)
+    student_name = db.Column(db.String(120), nullable=False)
+    quiz = db.Column(db.String(150), nullable=False, index=True)
+    subject = db.Column(db.String(100), nullable=False)
+    attempt_number = db.Column(db.Integer, nullable=False, default=1)
+    question_id = db.Column(db.String(64), nullable=False, index=True)
+    question_no = db.Column(db.Integer, nullable=False)
+    concept_tag = db.Column(db.String(120), nullable=False, index=True)
+    bloom_level = db.Column(db.String(50), nullable=True)
+    question_text = db.Column(db.Text, nullable=True)
+    option_a = db.Column(db.Text, nullable=True)
+    option_b = db.Column(db.Text, nullable=True)
+    option_c = db.Column(db.Text, nullable=True)
+    option_d = db.Column(db.Text, nullable=True)
+    selected_option = db.Column(db.String(20), nullable=True)
+    correct_option = db.Column(db.String(20), nullable=False)
+    is_correct = db.Column(db.Boolean, nullable=False, default=False)
+    is_unanswered = db.Column(db.Boolean, nullable=False, default=False)
+    question_marks = db.Column(db.Float, nullable=False, default=1.0)
+    marks_obtained = db.Column(db.Float, nullable=False, default=0.0)
+    submitted_at = db.Column(db.DateTime, nullable=False, index=True)
+    source = db.Column(db.String(30), nullable=False, default="imported_csv")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "student_id", "quiz", "attempt_number", "question_id",
+            name="uq_imported_student_quiz_attempt_question"
+        ),
+    )
+
+
+class ItemCalibration(db.Model):
+    """
+    Calibrated item difficulty parameters from Rasch / 1PL estimation
+    and population response statistics.
+    """
+    __tablename__ = "item_calibrations"
+
+    id = db.Column(db.Integer, primary_key=True)
+    question_id = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    quiz = db.Column(db.String(150), nullable=True)
+    concept_tag = db.Column(db.String(120), nullable=True, index=True)
+    bloom_level = db.Column(db.String(50), nullable=True)
+    total_responses = db.Column(db.Integer, default=0, nullable=False)
+    correct_responses = db.Column(db.Integer, default=0, nullable=False)
+    unanswered_responses = db.Column(db.Integer, default=0, nullable=False)
+    proportion_correct = db.Column(db.Float, nullable=True)
+    difficulty_b = db.Column(db.Float, default=0.0, nullable=False)
+    std_error = db.Column(db.Float, nullable=True)
+    calibration_status = db.Column(db.String(40), default="CALIBRATED", nullable=False)
+    calibration_method = db.Column(db.String(30), default="PROX", nullable=False)
+    metadata_json = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
