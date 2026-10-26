@@ -18,6 +18,7 @@
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('common.logout') }}">Logout</a>
                 {% elif session.get('role') == 'teacher' %}
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('teacher.dashboard') }}">Dashboard</a>
+                    <a class="btn btn-outline-light btn-sm" href="{{ url_for('teacher.students_analytics') }}">All Students</a>
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('teacher.create_quiz') }}">Create Quiz</a>
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('common.logout') }}">Logout</a>
                 {% else %}

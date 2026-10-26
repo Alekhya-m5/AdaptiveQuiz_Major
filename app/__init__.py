@@ -7,7 +7,7 @@ from .models import db
 load_dotenv()
 
 
-def create_app():
+def create_app(test_config=None):
     app = Flask(__name__)
 
     # Secret Key
@@ -22,6 +22,9 @@ def create_app():
     # Disable modification tracking
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+    if test_config:
+        app.config.update(test_config)
+
     # Initialize SQLAlchemy
     db.init_app(app)
 
@@ -34,8 +37,13 @@ def create_app():
     app.register_blueprint(student_bp, url_prefix="/student")
     app.register_blueprint(teacher_bp, url_prefix="/teacher")
 
+    # Register CLI Commands
+    from .cli import register_cli_commands
+    register_cli_commands(app)
+
     # Create database tables if they don't exist
-    with app.app_context():
-        db.create_all()
+    if not app.config.get("TESTING") or app.config.get("SQLALCHEMY_DATABASE_URI"):
+        with app.app_context():
+            db.create_all()
 
     return app

@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% block title %}Student Analytics — IRT & BKT{% endblock %}
+
+{% block content %}
+<style>
+  .mastery-cell {
+    display: inline-block;
+    width: 28px; height: 18px;
+    border-radius: 3px;
+    font-size: 9px;
+    line-height: 18px;
+    text-align: center;
+    font-weight: 600;
+    color: #fff;
+    cursor: default;
+  }
+  .mastery-high   { background: #198754; }
+  .mastery-mid    { background: #ffc107; color: #333; }
+  .mastery-low    { background: #dc3545; }
+  .mastery-none   { background: #dee2e6; color: #999; }
+
+  .theta-badge {
+    display: inline-block;
+    min-width: 58px;
+    text-align: center;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 0.85rem;
+  }
+  .theta-high   { background: #d1e7dd; color: #0f5132; }
+  .theta-mid    { background: #cff4fc; color: #055160; }
+  .theta-low    { background: #fff3cd; color: #664d03; }
+  .theta-vlow   { background: #f8d7da; color: #842029; }
+
+  .concept-abbr {
+    font-size: 10px;
+    color: #6c757d;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 60px;
+  }
+  #studentTable thead th { font-size: 0.78rem; white-space: nowrap; }
+  #studentTable tbody td { font-size: 0.8rem; vertical-align: middle; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-0">Student Analytics</h3>
+    <p class="text-muted mb-0">IRT Ability (θ) &amp; BKT Concept Mastery — {{ total_students }} students</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('teacher.dashboard') }}">← Dashboard</a>
+  </div>
+</div>
+
+<!-- Summary cards -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card text-center p-3 shadow-sm h-100">
+      <div class="text-muted small">Total Students</div>
+      <div class="fs-2 fw-bold">{{ total_students }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center p-3 shadow-sm h-100">
+      <div class="text-muted small">Average θ</div>
+      <div class="fs-2 fw-bold text-primary">{{ "%.3f"|format(avg_theta) }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center p-3 shadow-sm h-100">
+      <div class="text-muted small">Concepts Tracked</div>
+      <div class="fs-2 fw-bold text-info">{{ concepts|length }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card text-center p-3 shadow-sm h-100">
+      <div class="text-muted small">High Ability (θ ≥ 1)</div>
+      <div class="fs-2 fw-bold text-success">
+        {{ rows | selectattr('theta', 'ge', 1) | list | length }}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Charts row -->
+<div class="row g-3 mb-4">
+  <div class="col-md-5">
+    <div class="card p-3 shadow-sm h-100">
+      <h6>θ Distribution</h6>
+      <canvas id="thetaDistChart" height="220"></canvas>
+    </div>
+  </div>
+  <div class="col-md-7">
+    <div class="card p-3 shadow-sm h-100">
+      <h6>Average Mastery per Concept</h6>
+      <canvas id="conceptAvgChart" height="220"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Filter bar -->
+<div class="card p-3 shadow-sm mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label small mb-1">Search USN / Name</label>
+      <input id="searchInput" type="text" class="form-control form-control-sm" placeholder="Type to filter...">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small mb-1">Ability Band</label>
+      <select id="bandFilter" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="high">High (θ ≥ 1)</option>
+        <option value="mid">Mid (0 ≤ θ &lt; 1)</option>
+        <option value="low">Low (θ &lt; 0)</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <button onclick="resetFilters()" class="btn btn-sm btn-outline-secondary w-100">Reset</button>
+    </div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div class="d-flex gap-3 mb-2 flex-wrap">
+  <span class="small"><span class="mastery-cell mastery-high">70</span> ≥ 70% Mastery</span>
+  <span class="small"><span class="mastery-cell mastery-mid">40</span> 40–70% Mastery</span>
+  <span class="small"><span class="mastery-cell mastery-low">10</span> &lt; 40% Mastery</span>
+  <span class="small"><span class="mastery-cell mastery-none">—</span> No data</span>
+</div>
+
+<!-- Main table -->
+<div class="card shadow-sm mb-4">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0" id="studentTable">
+      <thead class="table-dark">
+        <tr>
+          <th>#</th>
+          <th>USN</th>
+          <th>Name</th>
+          <th>θ (Ability)</th>
+          <th>SE</th>
+          <th>Status</th>
+          <th>Ans / Corr</th>
+          {% for c in concepts %}
+          <th title="{{ c }}" class="text-center">
+            <div class="concept-abbr" title="{{ c }}">{{ c[:6] }}…</div>
+          </th>
+          {% endfor %}
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        {% for r in rows %}
+        <tr data-theta="{{ r.theta }}" data-search="{{ r.usn|lower }} {{ r.name|lower }}">
+          <td class="text-muted">{{ loop.index }}</td>
+          <td><code>{{ r.usn }}</code></td>
+          <td>{{ r.name }}</td>
+          <td>
+            {% set th = r.theta %}
+            <span class="theta-badge
+              {% if th >= 1 %}theta-high
+              {% elif th >= 0 %}theta-mid
+              {% elif th >= -1 %}theta-low
+              {% else %}theta-vlow{% endif %}">
+              {{ "%.2f"|format(th) }}
+            </span>
+          </td>
+          <td class="text-muted small">
+            {% if r.std_error %}{{ "%.3f"|format(r.std_error) }}{% else %}—{% endif %}
+          </td>
+          <td>
+            <span class="badge
+              {% if r.estimation_status == 'ESTIMATED' %}bg-primary
+              {% elif r.estimation_status == 'ALL_CORRECT' %}bg-success
+              {% elif r.estimation_status == 'ALL_WRONG' or r.estimation_status == 'BOUNDARY_LOW' %}bg-danger
+              {% else %}bg-secondary{% endif %}
+              rounded-pill" style="font-size:0.7rem;">
+              {{ r.estimation_status }}
+            </span>
+          </td>
+          <td class="small text-center">
+            {{ r.responses_count }} / {{ r.correct_count }}
+          </td>
+          {% for c in concepts %}
+            {% set m = r.mastery.get(c) %}
+            <td class="text-center">
+              {% if m is not none %}
+                <span class="mastery-cell
+                  {% if m >= 0.7 %}mastery-high
+                  {% elif m >= 0.4 %}mastery-mid
+                  {% else %}mastery-low{% endif %}"
+                  title="{{ c }}: {{ (m * 100)|round|int }}%">
+                  {{ (m * 100)|round|int }}
+                </span>
+              {% else %}
+                <span class="mastery-cell mastery-none" title="{{ c }}: no data">—</span>
+              {% endif %}
+            </td>
+          {% endfor %}
+          <td>
+            <a href="{{ url_for('teacher.student_profile', usn=r.usn) }}"
+               class="btn btn-sm btn-outline-primary">Profile</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+// ── Data ───────────────────────────────────────────────────────────
+const buckets   = {{ buckets | tojson }};
+const concepts  = {{ concepts | tojson }};
+const rows      = {{ rows | tojson }};
+
+// ── Theta distribution chart ───────────────────────────────────────
+new Chart(document.getElementById('thetaDistChart'), {
+  type: 'bar',
+  data: {
+    labels: Object.keys(buckets),
+    datasets: [{
+      label: 'Students',
+      data: Object.values(buckets),
+      backgroundColor: [
+        '#dc3545','#dc3545','#ffc107','#ffc107',
+        '#0dcaf0','#0dcaf0','#198754','#198754'
+      ],
+      borderRadius: 4,
+    }]
+  },
+  options: {
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { title: { display: true, text: 'Theta (θ)' } },
+      y: { beginAtZero: true, ticks: { stepSize: 1 },
+           title: { display: true, text: 'Students' } }
+    }
+  }
+});
+
+// ── Average mastery per concept chart ─────────────────────────────
+const conceptAvgs = concepts.map(c => {
+  const vals = rows.map(r => r.mastery[c]).filter(v => v !== null && v !== undefined);
+  return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*100) : 0;
+});
+
+const palette = [
+  '#0d6efd','#198754','#ffc107','#dc3545','#0dcaf0',
+  '#6f42c1','#fd7e14','#20c997','#6c757d','#d63384','#0dcaf0'
+];
+
+new Chart(document.getElementById('conceptAvgChart'), {
+  type: 'bar',
+  data: {
+    labels: concepts.map(c => c.length > 22 ? c.substring(0,22)+'…' : c),
+    datasets: [{
+      label: 'Avg Mastery %',
+      data: conceptAvgs,
+      backgroundColor: palette,
+      borderRadius: 4,
+    }]
+  },
+  options: {
+    indexAxis: 'y',
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          title: (items) => concepts[items[0].dataIndex],
+          label: (ctx) => `Average mastery: ${ctx.raw}%`
+        }
+      }
+    },
+    scales: {
+      x: { beginAtZero: true, max: 100,
+           title: { display: true, text: 'Average Mastery (%)' } }
+    }
+  }
+});
+
+// ── Filter ─────────────────────────────────────────────────────────
+function filterTable() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const band   = document.getElementById('bandFilter').value;
+  document.querySelectorAll('#tableBody tr').forEach(row => {
+    const th    = parseFloat(row.dataset.theta);
+    const text  = row.dataset.search;
+    const matchSearch = !search || text.includes(search);
+    let matchBand = true;
+    if (band === 'high') matchBand = th >= 1;
+    else if (band === 'mid') matchBand = th >= 0 && th < 1;
+    else if (band === 'low') matchBand = th < 0;
+    row.style.display = matchSearch && matchBand ? '' : 'none';
+  });
+}
+
+function resetFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('bandFilter').value = '';
+  filterTable();
+}
+
+document.getElementById('searchInput').addEventListener('input', filterTable);
+document.getElementById('bandFilter').addEventListener('change', filterTable);
+</script>
+{% endblock %}

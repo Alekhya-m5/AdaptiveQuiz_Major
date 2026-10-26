@@ -356,3 +356,213 @@ def download_report(quiz_id):
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@teacher_bp.route("/import-csv", methods=["POST"])
+@teacher_required
+def import_csv():
+    """
+    Teacher endpoint to upload and ingest a weekly assessment CSV,
+    followed by automated IRT and BKT recalculation.
+    """
+    from app.pipeline import AdaptivePipeline
+    from flask import jsonify
+
+    uploaded_file = request.files.get("file")
+    file_path = request.form.get("file_path") or (request.get_json(silent=True) or {}).get("file_path")
+
+    if uploaded_file and uploaded_file.filename:
+        try:
+            res = AdaptivePipeline.run_pipeline(uploaded_file, filename=uploaded_file.filename)
+            return jsonify(res), 200
+        except Exception as e:
+            return jsonify({"status": "ERROR", "message": str(e)}), 400
+
+    elif file_path:
+        try:
+            res = AdaptivePipeline.run_pipeline(file_path)
+            return jsonify(res), 200
+        except Exception as e:
+            return jsonify({"status": "ERROR", "message": str(e)}), 400
+
+    return jsonify({"status": "ERROR", "message": "No file uploaded and no file_path provided."}), 400
+
+
+@teacher_bp.route("/recalculate-models", methods=["POST"])
+@teacher_required
+def recalculate_models():
+    """
+    Teacher endpoint to recalculate IRT and BKT models on existing persistent responses.
+    """
+    from app.pipeline import AdaptivePipeline
+    from flask import jsonify
+
+    try:
+        res = AdaptivePipeline.recalculate_models_only()
+        return jsonify(res), 200
+    except Exception as e:
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+@teacher_bp.route("/analytics/summary", methods=["GET"])
+@teacher_required
+def analytics_summary():
+    """
+    Teacher endpoint to view database summary of batches, calibrations, thetas, and masteries.
+    """
+    from flask import jsonify
+    from app.models import ImportBatch, ItemCalibration, StudentTheta, StudentMastery, ImportedResponse
+
+    batches = ImportBatch.query.order_by(ImportBatch.created_at.desc()).all()
+    items = ItemCalibration.query.order_by(ItemCalibration.difficulty_b.asc()).all()
+    thetas = StudentTheta.query.order_by(StudentTheta.theta.desc()).limit(50).all()
+    masteries = StudentMastery.query.order_by(StudentMastery.mastery.desc()).limit(50).all()
+
+    return jsonify({
+        "total_batches": len(batches),
+        "total_imported_responses": ImportedResponse.query.count(),
+        "batches": [
+            {
+                "id": b.id,
+                "filename": b.filename,
+                "status": b.status,
+                "total_rows": b.total_rows,
+                "valid_rows": b.valid_rows,
+                "error_summary": b.error_summary,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+            }
+            for b in batches
+        ],
+        "items": [
+            {
+                "question_id": i.question_id,
+                "concept_tag": i.concept_tag,
+                "bloom_level": i.bloom_level,
+                "difficulty_b": i.difficulty_b,
+                "p_val": i.proportion_correct,
+                "status": i.calibration_status,
+            }
+            for i in items
+        ],
+        "thetas_sample": [
+            {"usn": t.usn, "theta": t.theta, "status": t.estimation_status}
+            for t in thetas
+        ],
+        "masteries_sample": [
+            {"usn": m.usn, "concept": m.concept_tag, "mastery": m.mastery}
+            for m in masteries
+        ],
+    }), 200
+
+
+
+@teacher_bp.route("/analytics/students")
+@teacher_required
+def students_analytics():
+    """
+    Teacher view: all imported students ranked by IRT theta,
+    with BKT mastery per concept displayed alongside.
+    """
+    from app.models import StudentTheta, StudentMastery, Student
+    from collections import defaultdict
+
+    # All theta records ordered by theta desc
+    thetas = StudentTheta.query.order_by(StudentTheta.theta.desc()).all()
+
+    # Build student name lookup (some imported-only students have placeholder names)
+    student_lookup = {s.usn: s for s in Student.query.all()}
+
+    # All mastery records, grouped by usn
+    mastery_by_usn = defaultdict(dict)
+    for m in StudentMastery.query.all():
+        mastery_by_usn[m.usn][m.concept_tag] = m
+
+    # Sorted unique concept list
+    concepts = sorted({
+        m.concept_tag
+        for records in mastery_by_usn.values()
+        for m in records.values()
+    })
+
+    # Build rows for template
+    rows = []
+    for t in thetas:
+        student = student_lookup.get(t.usn)
+        name = student.full_name if student and student.first_name != t.usn else t.usn
+        rows.append({
+            "usn": t.usn,
+            "name": name,
+            "theta": round(t.theta, 3),
+            "std_error": round(t.std_error, 3) if t.std_error else None,
+            "estimation_status": t.estimation_status,
+            "responses_count": t.responses_count,
+            "correct_count": t.correct_count,
+            "updated_at": t.updated_at,
+            "mastery": {
+                c: round(mastery_by_usn[t.usn][c].mastery, 4)
+                if c in mastery_by_usn[t.usn] else None
+                for c in concepts
+            },
+        })
+
+    # Theta distribution buckets for histogram
+    buckets = {"-4 to -3": 0, "-3 to -2": 0, "-2 to -1": 0,
+                "-1 to 0": 0, "0 to 1": 0, "1 to 2": 0,
+                "2 to 3": 0, "3 to 4": 0}
+    for r in rows:
+        th = r["theta"]
+        if th < -3:   buckets["-4 to -3"] += 1
+        elif th < -2: buckets["-3 to -2"] += 1
+        elif th < -1: buckets["-2 to -1"] += 1
+        elif th < 0:  buckets["-1 to 0"] += 1
+        elif th < 1:  buckets["0 to 1"] += 1
+        elif th < 2:  buckets["1 to 2"] += 1
+        elif th < 3:  buckets["2 to 3"] += 1
+        else:         buckets["3 to 4"] += 1
+
+    avg_theta = round(sum(r["theta"] for r in rows) / len(rows), 3) if rows else 0
+
+    return render_template(
+        "teacher/students_analytics.html",
+        rows=rows,
+        concepts=concepts,
+        buckets=buckets,
+        avg_theta=avg_theta,
+        total_students=len(rows),
+    )
+
+
+@teacher_bp.route("/student/<usn>")
+@teacher_required
+def student_profile(usn):
+    """
+    Teacher view: IRT theta + BKT concept mastery detail for one student.
+    """
+    from app.models import StudentTheta, StudentMastery, Student, ImportedResponse
+
+    theta_record = StudentTheta.query.filter_by(usn=usn).first_or_404()
+    student = Student.query.get(usn)
+    name = student.full_name if student and student.first_name != usn else usn
+
+    masteries = (
+        StudentMastery.query.filter_by(usn=usn)
+        .order_by(StudentMastery.mastery.desc())
+        .all()
+    )
+
+    # Response summary from imported records
+    from sqlalchemy import func
+    total_imported = ImportedResponse.query.filter_by(student_id=usn).count()
+    total_correct = ImportedResponse.query.filter_by(student_id=usn, is_correct=True).count()
+    total_unanswered = ImportedResponse.query.filter_by(student_id=usn, is_unanswered=True).count()
+
+    return render_template(
+        "teacher/student_profile.html",
+        usn=usn,
+        name=name,
+        theta_record=theta_record,
+        masteries=masteries,
+        total_imported=total_imported,
+        total_correct=total_correct,
+        total_unanswered=total_unanswered,
+    )

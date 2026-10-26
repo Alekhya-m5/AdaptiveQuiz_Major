@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% block title %}Student Profile — {{ usn }}{% endblock %}
+
+{% block content %}
+<style>
+  .stat-card { border-radius: 12px; padding: 1.2rem 1.5rem; }
+  .concept-bar-wrap { margin-bottom: 0.6rem; }
+  .concept-label { font-size: 0.82rem; color: #333; margin-bottom: 2px; }
+  .concept-meta  { font-size: 0.72rem; color: #6c757d; }
+  .theta-hero {
+    font-size: 3.5rem; font-weight: 800;
+    line-height: 1;
+  }
+  .interpretation-chip {
+    display: inline-block;
+    padding: 3px 12px; border-radius: 20px;
+    font-size: 0.78rem; font-weight: 600;
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-0">Student Profile</h3>
+    <p class="text-muted mb-0">{{ name }} &mdash; <code>{{ usn }}</code></p>
+  </div>
+  <a href="{{ url_for('teacher.students_analytics') }}" class="btn btn-outline-secondary btn-sm">
+    ← All Students
+  </a>
+</div>
+
+<!-- ── IRT Section ──────────────────────────────────────────────── -->
+<h5 class="mt-3 mb-2 text-primary">IRT — Estimated Ability (θ)</h5>
+<div class="row g-3 mb-4">
+
+  <div class="col-md-4">
+    <div class="card stat-card shadow-sm text-center h-100">
+      <div class="text-muted small mb-1">Ability Estimate (θ)</div>
+      <div class="theta-hero
+        {% if theta_record.theta >= 1 %}text-success
+        {% elif theta_record.theta >= 0 %}text-primary
+        {% elif theta_record.theta >= -1 %}text-warning
+        {% else %}text-danger{% endif %}">
+        {{ "%.3f"|format(theta_record.theta) }}
+      </div>
+      <div class="mt-2">
+        {% set th = theta_record.theta %}
+        {% if th >= 2 %}
+          <span class="interpretation-chip bg-success text-white">Advanced</span>
+        {% elif th >= 1 %}
+          <span class="interpretation-chip bg-success bg-opacity-75 text-white">Proficient</span>
+        {% elif th >= 0 %}
+          <span class="interpretation-chip bg-primary text-white">Developing</span>
+        {% elif th >= -1 %}
+          <span class="interpretation-chip bg-warning text-dark">Beginning</span>
+        {% else %}
+          <span class="interpretation-chip bg-danger text-white">At Risk</span>
+        {% endif %}
+      </div>
+      {% if theta_record.std_error %}
+      <div class="text-muted small mt-1">SE = {{ "%.3f"|format(theta_record.std_error) }}</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card stat-card shadow-sm h-100">
+      <div class="text-muted small mb-2">Estimation Details</div>
+      <table class="table table-sm mb-0">
+        <tr>
+          <td class="text-muted">Status</td>
+          <td>
+            <span class="badge rounded-pill
+              {% if theta_record.estimation_status == 'ESTIMATED' %}bg-primary
+              {% elif theta_record.estimation_status == 'ALL_CORRECT' %}bg-success
+              {% else %}bg-danger{% endif %}">
+              {{ theta_record.estimation_status }}
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td class="text-muted">Questions</td>
+          <td>{{ theta_record.responses_count }}</td>
+        </tr>
+        <tr>
+          <td class="text-muted">Correct</td>
+          <td>{{ theta_record.correct_count }}</td>
+        </tr>
+        <tr>
+          <td class="text-muted">Attempts</td>
+          <td>{{ theta_record.quizzes_attempted }}</td>
+        </tr>
+        <tr>
+          <td class="text-muted">Last updated</td>
+          <td class="small">
+            {% if theta_record.updated_at %}
+              {{ theta_record.updated_at.strftime('%d %b %Y') }}
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card stat-card shadow-sm h-100">
+      <div class="text-muted small mb-2">Assessment Summary (Imported)</div>
+      <table class="table table-sm mb-0">
+        <tr>
+          <td class="text-muted">Total questions</td>
+          <td>{{ total_imported }}</td>
+        </tr>
+        <tr>
+          <td class="text-muted">Correct answers</td>
+          <td class="text-success fw-bold">{{ total_correct }}</td>
+        </tr>
+        <tr>
+          <td class="text-muted">Unanswered</td>
+          <td class="text-warning fw-bold">{{ total_unanswered }}</td>
+        </tr>
+        <tr>
+          <td class="text-muted">Wrong answers</td>
+          <td class="text-danger fw-bold">{{ total_imported - total_correct - total_unanswered }}</td>
+        </tr>
+        {% if total_imported > 0 %}
+        <tr>
+          <td class="text-muted">Accuracy</td>
+          <td>{{ ((total_correct / total_imported) * 100)|round(1) }}%</td>
+        </tr>
+        {% endif %}
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── IRT Scale reference ──────────────────────────────────────── -->
+<div class="card p-3 shadow-sm mb-4">
+  <div class="d-flex align-items-center gap-2 mb-1">
+    <span class="small text-muted">θ scale: −4</span>
+    <div class="flex-grow-1 position-relative" style="height:20px;">
+      <div class="progress" style="height:20px; border-radius:10px;">
+        <div class="progress-bar bg-danger"    style="width:25%">At Risk</div>
+        <div class="progress-bar bg-warning text-dark"   style="width:25%">Beginning</div>
+        <div class="progress-bar bg-primary"   style="width:25%">Developing/Proficient</div>
+        <div class="progress-bar bg-success"   style="width:25%">Advanced</div>
+      </div>
+      <!-- Marker -->
+      {% set pct = ((theta_record.theta + 4) / 8 * 100)|round(1) %}
+      {% set pct_clamped = [0, [pct, 100]|min]|max %}
+      <div style="position:absolute; top:-4px; left:{{ pct_clamped }}%;
+                  transform:translateX(-50%); width:3px; height:28px;
+                  background:#212529; border-radius:2px;" title="θ = {{ '%.2f'|format(theta_record.theta) }}"></div>
+    </div>
+    <span class="small text-muted">+4</span>
+  </div>
+  <div class="text-center small text-muted">
+    This student's θ = <strong>{{ "%.3f"|format(theta_record.theta) }}</strong>
+  </div>
+</div>
+
+<!-- ── BKT Section ──────────────────────────────────────────────── -->
+<h5 class="mt-3 mb-2 text-success">BKT — Concept Mastery Probabilities</h5>
+
+{% if masteries %}
+
+<div class="row g-3 mb-4">
+  <!-- Progress bars -->
+  <div class="col-md-7">
+    <div class="card p-3 shadow-sm h-100">
+      <h6 class="mb-3">Mastery by Concept</h6>
+      {% for m in masteries %}
+      <div class="concept-bar-wrap">
+        <div class="d-flex justify-content-between concept-label">
+          <span>{{ m.concept_tag }}</span>
+          <span class="fw-bold
+            {% if m.mastery >= 0.7 %}text-success
+            {% elif m.mastery >= 0.4 %}text-warning
+            {% else %}text-danger{% endif %}">
+            {{ (m.mastery * 100)|round(1) }}%
+          </span>
+        </div>
+        <div class="progress" style="height: 12px; border-radius: 6px;">
+          <div class="progress-bar
+            {% if m.mastery >= 0.7 %}bg-success
+            {% elif m.mastery >= 0.4 %}bg-warning
+            {% else %}bg-danger{% endif %}"
+            style="width: {{ (m.mastery * 100)|round(1) }}%; border-radius:6px;">
+          </div>
+        </div>
+        <div class="concept-meta">
+          {{ m.attempts }} observations &nbsp;·&nbsp;
+          {{ m.correct_count }} correct &nbsp;·&nbsp;
+          {% if m.unanswered_count %}{{ m.unanswered_count }} unanswered{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Radar chart -->
+  <div class="col-md-5">
+    <div class="card p-3 shadow-sm h-100 d-flex flex-column">
+      <h6 class="mb-3">Mastery Radar</h6>
+      <div class="flex-grow-1 d-flex align-items-center justify-content-center">
+        <canvas id="radarChart" style="max-height:320px;"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BKT detail table -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header"><strong>Concept Mastery Details</strong></div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Concept</th>
+          <th class="text-center">P(Mastery)</th>
+          <th class="text-center">Observations</th>
+          <th class="text-center">Correct</th>
+          <th class="text-center">Unanswered</th>
+          <th class="text-center">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in masteries %}
+        <tr>
+          <td>{{ m.concept_tag }}</td>
+          <td class="text-center fw-bold
+            {% if m.mastery >= 0.7 %}text-success
+            {% elif m.mastery >= 0.4 %}text-warning
+            {% else %}text-danger{% endif %}">
+            {{ "%.4f"|format(m.mastery) }}
+          </td>
+          <td class="text-center">{{ m.attempts }}</td>
+          <td class="text-center text-success">{{ m.correct_count }}</td>
+          <td class="text-center text-warning">{{ m.unanswered_count or 0 }}</td>
+          <td class="text-center">
+            {% if m.mastery >= 0.7 %}
+              <span class="badge bg-success">Mastered</span>
+            {% elif m.mastery >= 0.4 %}
+              <span class="badge bg-warning text-dark">Developing</span>
+            {% else %}
+              <span class="badge bg-danger">Needs Work</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% else %}
+<div class="alert alert-secondary">No BKT mastery records found for this student.</div>
+{% endif %}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+{% if masteries %}
+const conceptLabels = {{ masteries | map(attribute='concept_tag') | list | tojson }};
+const masteryVals   = {{ masteries | map(attribute='mastery') | list | tojson }};
+
+new Chart(document.getElementById('radarChart'), {
+  type: 'radar',
+  data: {
+    labels: conceptLabels,
+    datasets: [{
+      label: 'Mastery P(L)',
+      data: masteryVals,
+      backgroundColor: 'rgba(25, 135, 84, 0.2)',
+      borderColor: '#198754',
+      pointBackgroundColor: masteryVals.map(v =>
+        v >= 0.7 ? '#198754' : v >= 0.4 ? '#ffc107' : '#dc3545'
+      ),
+      pointRadius: 5,
+      borderWidth: 2,
+    }]
+  },
+  options: {
+    scales: {
+      r: {
+        beginAtZero: true,
+        max: 1.0,
+        ticks: { stepSize: 0.2,
+          callback: v => `${Math.round(v*100)}%`
+        },
+        pointLabels: { font: { size: 10 } }
+      }
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => `${Math.round(ctx.raw * 100)}% mastery`
+        }
+      }
+    }
+  }
+});
+{% endif %}
+</script>
+{% endblock %}
