@@ -1,0 +1,444 @@
+{% extends "base.html" %}
+{% block title %}{{ quiz_title }} - Quiz Analytics{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1">
+                <li class="breadcrumb-item"><a href="{{ url_for('teacher.dashboard') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active" aria-current="page">Quiz Analytics</li>
+            </ol>
+        </nav>
+        <h3 class="mb-1">{{ quiz_title }}</h3>
+        <p class="text-muted mb-0">
+            Subject: <span class="badge bg-secondary">{{ subject }}</span> &middot;
+            {{ summary.total_students }} unique students &middot;
+            {{ summary.total_attempts }} total submissions &middot;
+            {{ question_stats|length }} questions
+        </p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <div class="dropdown">
+            <button class="btn btn-outline-primary dropdown-toggle" type="button" id="exportDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                📥 Export CSV Reports
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="exportDropdown">
+                <li><h6 class="dropdown-header">Available Reports for this Quiz</h6></li>
+                <li>
+                    <a class="dropdown-item" href="{{ url_for('teacher.export_students_csv', quiz=quiz_title) }}">
+                        👥 Student Performance Summary
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item" href="{{ url_for('teacher.export_questions_csv', quiz=quiz_title) }}">
+                        🎯 Question-Level IRT Difficulty Analysis
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item" href="{{ url_for('teacher.export_mastery_csv', quiz=quiz_title) }}">
+                        🧠 Student-Concept BKT Mastery
+                    </a>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                    <a class="dropdown-item text-muted small" href="{{ url_for('teacher.export_full_detail_csv', quiz=quiz_title) }}">
+                        📑 Full Item-Level Detail (All Responses)
+                    </a>
+                </li>
+            </ul>
+        </div>
+        <a href="{{ url_for('teacher.dashboard') }}" class="btn btn-outline-secondary">← Back to Dashboard</a>
+    </div>
+</div>
+
+<div class="alert alert-light border shadow-sm small py-2 mb-4 d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <div>
+        <span class="badge bg-info text-dark me-2">Data Semantics Notice</span>
+        Quiz score, accuracy, and attempt metrics reflect performance on <strong>{{ quiz_title }}</strong>.
+        Learner ability (θ) and BKT concept mastery represent <strong>cumulative</strong> status across their learning trajectory.
+    </div>
+    <a href="{{ url_for('teacher.students_analytics') }}" class="btn btn-sm btn-link p-0 text-decoration-none">
+        View Cohort-Wide Analytics &rarr;
+    </a>
+</div>
+
+<!-- Summary KPI Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md">
+        <div class="card p-3 text-center h-100 shadow-sm">
+            <div class="text-muted small">Assessed Students</div>
+            <div class="fs-3 fw-bold text-dark">{{ summary.total_students }}</div>
+            <div class="text-muted" style="font-size:0.75rem;">{{ summary.total_attempts }} total attempts</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="card p-3 text-center h-100 shadow-sm">
+            <div class="text-muted small">Average Score</div>
+            <div class="fs-3 fw-bold text-primary">{{ summary.average_percentage }}%</div>
+            <div class="text-muted" style="font-size:0.75rem;">Range: {{ summary.lowest_percentage }}% - {{ summary.highest_percentage }}%</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="card p-3 text-center h-100 shadow-sm">
+            <div class="text-muted small">Highest Score</div>
+            <div class="fs-3 fw-bold text-success">{{ summary.highest_percentage }}%</div>
+            <div class="text-muted" style="font-size:0.75rem;">Lowest: {{ summary.lowest_percentage }}%</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="card p-3 text-center h-100 shadow-sm border-primary">
+            <div class="text-muted small">Avg Ability (θ)</div>
+            <div class="fs-3 fw-bold
+                {% if summary.average_theta >= 1.0 %}text-success
+                {% elif summary.average_theta >= 0.0 %}text-primary
+                {% elif summary.average_theta >= -1.0 %}text-warning
+                {% else %}text-danger{% endif %}">
+                {{ "%.2f"|format(summary.average_theta) }}
+            </div>
+            <div class="text-muted" style="font-size:0.75rem;">IRT Rasch Scale</div>
+        </div>
+    </div>
+    <div class="col-6 col-md">
+        <div class="card p-3 text-center h-100 shadow-sm">
+            <div class="text-muted small">Concepts Tested</div>
+            <div class="fs-3 fw-bold text-dark">{{ concept_stats|length }}</div>
+            <div class="text-muted" style="font-size:0.75rem;">Across {{ question_stats|length }} questions</div>
+        </div>
+    </div>
+</div>
+
+<!-- Visual Charts Section -->
+<div class="row g-3 mb-4">
+    <div class="col-lg-4 col-md-6">
+        <div class="card p-3 h-100 shadow-sm">
+            <h6 class="card-title fw-semibold mb-3">Score Distribution</h6>
+            <div style="position:relative; height:220px;">
+                <canvas id="scoreDistributionChart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4 col-md-6">
+        <div class="card p-3 h-100 shadow-sm">
+            <h6 class="card-title fw-semibold mb-3">Item Difficulty (b) vs Accuracy</h6>
+            <div style="position:relative; height:220px;">
+                <canvas id="itemDifficultyChart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4 col-md-12">
+        <div class="card p-3 h-100 shadow-sm">
+            <h6 class="card-title fw-semibold mb-3">Concept Mastery Summary (BKT)</h6>
+            <div style="position:relative; height:220px;">
+                <canvas id="conceptMasteryChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Data Tabs -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom p-0">
+        <ul class="nav nav-tabs card-header-tabs m-0 px-3" id="analyticsTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active py-3 fw-semibold" id="students-tab" data-bs-toggle="tab" data-bs-target="#students-pane" type="button" role="tab" aria-controls="students-pane" aria-selected="true">
+                    👥 Student Submissions ({{ student_attempts|length }})
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link py-3 fw-semibold" id="questions-tab" data-bs-toggle="tab" data-bs-target="#questions-pane" type="button" role="tab" aria-controls="questions-pane" aria-selected="false">
+                    🎯 Question-Level IRT ({{ question_stats|length }})
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link py-3 fw-semibold" id="concepts-tab" data-bs-toggle="tab" data-bs-target="#concepts-pane" type="button" role="tab" aria-controls="concepts-pane" aria-selected="false">
+                    🧠 Concepts Tested ({{ concept_stats|length }})
+                </button>
+            </li>
+        </ul>
+    </div>
+    <div class="card-body p-0">
+        <div class="tab-content" id="analyticsTabsContent">
+
+            <!-- Tab 1: Student Submissions -->
+            <div class="tab-pane fade show active p-3" id="students-pane" role="tabpanel" aria-labelledby="students-tab">
+                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                    <input type="text" id="studentSearchInput" class="form-control form-control-sm" style="max-width:300px;" placeholder="Filter by Student USN or Name...">
+                    <div class="small text-muted">
+                        Showing all {{ student_attempts|length }} student submissions
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover table-bordered align-middle mb-0" id="studentAttemptsTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th>USN</th>
+                                <th>Student Name</th>
+                                <th class="text-center" width="70">Attempt</th>
+                                <th class="text-center">Score</th>
+                                <th class="text-center">Percentage</th>
+                                <th class="text-center">Correct</th>
+                                <th class="text-center">Wrong</th>
+                                <th class="text-center">Unanswered</th>
+                                <th class="text-center">Cumulative Ability (θ)</th>
+                                <th>Submitted At</th>
+                                <th class="text-center" width="90">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for a in student_attempts %}
+                            <tr>
+                                <td><code>{{ a.student_id }}</code></td>
+                                <td class="fw-medium">{{ a.student_name }}</td>
+                                <td class="text-center"><span class="badge bg-light text-dark border">#{{ a.attempt_number }}</span></td>
+                                <td class="text-center fw-bold">{{ "%.1f"|format(a.marks_obtained) }} / {{ "%.1f"|format(a.total_marks) }}</td>
+                                <td class="text-center">
+                                    <span class="fw-bold
+                                        {% if a.percentage >= 70 %}text-success
+                                        {% elif a.percentage >= 40 %}text-warning
+                                        {% else %}text-danger{% endif %}">
+                                        {{ a.percentage }}%
+                                    </span>
+                                </td>
+                                <td class="text-center text-success fw-semibold">{{ a.correct_count }}</td>
+                                <td class="text-center text-danger fw-semibold">{{ a.wrong_count }}</td>
+                                <td class="text-center text-muted">{{ a.unanswered_count }}</td>
+                                <td class="text-center">
+                                    {% if a.theta is not none %}
+                                    <span class="badge
+                                        {% if a.theta >= 1.0 %}bg-success
+                                        {% elif a.theta >= 0.0 %}bg-primary
+                                        {% elif a.theta >= -1.0 %}bg-warning text-dark
+                                        {% else %}bg-danger{% endif %}">
+                                        θ = {{ "%.2f"|format(a.theta) }}
+                                    </span>
+                                    {% else %}
+                                    <span class="text-muted small">&mdash;</span>
+                                    {% endif %}
+                                </td>
+                                <td class="small text-muted">
+                                    {% if a.submitted_at %}{{ a.submitted_at.strftime('%d %b %Y, %H:%M') }}{% else %}&mdash;{% endif %}
+                                </td>
+                                <td class="text-center">
+                                    <a href="{{ url_for('teacher.student_profile', usn=a.student_id) }}" class="btn btn-sm btn-outline-primary py-0">
+                                        View
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tab 2: Question-Level IRT Analysis -->
+            <div class="tab-pane fade p-3" id="questions-pane" role="tabpanel" aria-labelledby="questions-tab">
+                <div class="table-responsive">
+                    <table class="table table-hover table-bordered align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th width="60" class="text-center">Q#</th>
+                                <th>Question ID</th>
+                                <th>Concept Tag</th>
+                                <th width="100">Bloom's Level</th>
+                                <th class="text-center">Responses</th>
+                                <th class="text-center">Quiz Accuracy</th>
+                                <th class="text-center">Calibrated Difficulty (b)</th>
+                                <th class="text-center">Std Error</th>
+                                <th class="text-center">Calibration Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for q in question_stats %}
+                            <tr>
+                                <td class="text-center fw-bold">{{ q.question_no }}</td>
+                                <td><code>{{ q.question_id }}</code></td>
+                                <td class="small">{{ q.concept_tag }}</td>
+                                <td><span class="badge bg-secondary">{{ q.bloom_level }}</span></td>
+                                <td class="text-center">{{ q.total_responses }}</td>
+                                <td class="text-center">
+                                    <div class="d-flex align-items-center justify-content-center gap-2">
+                                        <div class="progress flex-grow-1" style="height:6px; max-width:80px;">
+                                            <div class="progress-bar {% if q.accuracy_percentage >= 60 %}bg-success{% elif q.accuracy_percentage >= 40 %}bg-warning{% else %}bg-danger{% endif %}"
+                                                 style="width:{{ q.accuracy_percentage }}%;"></div>
+                                        </div>
+                                        <span class="fw-semibold">{{ q.accuracy_percentage }}%</span>
+                                    </div>
+                                </td>
+                                <td class="text-center fw-bold
+                                    {% if q.difficulty_b > 0.5 %}text-danger
+                                    {% elif q.difficulty_b < -0.5 %}text-success
+                                    {% else %}text-primary{% endif %}">
+                                    {{ "%.3f"|format(q.difficulty_b) }}
+                                </td>
+                                <td class="text-center text-muted small">
+                                    {% if q.std_error %}&plusmn;{{ "%.3f"|format(q.std_error) }}{% else %}&mdash;{% endif %}
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge {% if q.calibration_status == 'CALIBRATED' %}bg-success bg-opacity-75{% else %}bg-warning text-dark{% endif %}">
+                                        {{ q.calibration_status }}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tab 3: Concepts Tested -->
+            <div class="tab-pane fade p-3" id="concepts-pane" role="tabpanel" aria-labelledby="concepts-tab">
+                <div class="table-responsive">
+                    <table class="table table-hover table-bordered align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Concept Tag</th>
+                                <th class="text-center" width="90">Questions</th>
+                                <th class="text-center" width="120">Assessed Students</th>
+                                <th class="text-center">Average Mastery P(L)</th>
+                                <th class="text-center" width="120">Mastered (&ge;70%)</th>
+                                <th class="text-center" width="120">Developing (40-70%)</th>
+                                <th class="text-center" width="120">Needs Work (&lt;40%)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for c in concept_stats %}
+                            <tr>
+                                <td class="fw-medium">{{ c.concept_tag }}</td>
+                                <td class="text-center"><span class="badge bg-light text-dark border">{{ c.question_count }}</span></td>
+                                <td class="text-center">{{ c.students_assessed }}</td>
+                                <td class="text-center">
+                                    <div class="d-flex align-items-center justify-content-center gap-2">
+                                        <div class="progress flex-grow-1" style="height:8px; max-width:120px;">
+                                            <div class="progress-bar {% if c.average_mastery >= 0.7 %}bg-success{% elif c.average_mastery >= 0.4 %}bg-warning{% else %}bg-danger{% endif %}"
+                                                 style="width:{{ c.average_percentage }}%;"></div>
+                                        </div>
+                                        <span class="fw-bold">{{ c.average_percentage }}%</span>
+                                    </div>
+                                </td>
+                                <td class="text-center text-success fw-bold">{{ c.mastered_count }}</td>
+                                <td class="text-center text-warning text-dark fw-bold">{{ c.developing_count }}</td>
+                                <td class="text-center text-danger fw-bold">{{ c.needs_work_count }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- Chart.js Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+// 1. Score Distribution Histogram
+const scoreBuckets = {{ buckets | tojson }};
+new Chart(document.getElementById('scoreDistributionChart'), {
+    type: 'bar',
+    data: {
+        labels: Object.keys(scoreBuckets),
+        datasets: [{
+            label: 'Students',
+            data: Object.values(scoreBuckets),
+            backgroundColor: ['#dc3545', '#fd7e14', '#ffc107', '#0dcaf0', '#198754'],
+            borderRadius: 4
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+});
+
+// 2. Question Difficulty vs Accuracy
+const questionLabels = {{ question_stats | map(attribute='question_no') | list | tojson }}.map(n => 'Q' + n);
+const difficulties = {{ question_stats | map(attribute='difficulty_b') | list | tojson }};
+const accuracies = {{ question_stats | map(attribute='accuracy_percentage') | list | tojson }};
+
+new Chart(document.getElementById('itemDifficultyChart'), {
+    type: 'bar',
+    data: {
+        labels: questionLabels,
+        datasets: [
+            {
+                type: 'line',
+                label: 'Accuracy %',
+                data: accuracies,
+                borderColor: '#198754',
+                backgroundColor: '#198754',
+                yAxisID: 'yAccuracy',
+                borderWidth: 2,
+                tension: 0.2
+            },
+            {
+                type: 'bar',
+                label: 'Difficulty (b)',
+                data: difficulties,
+                backgroundColor: 'rgba(13, 110, 253, 0.4)',
+                borderColor: '#0d6efd',
+                borderWidth: 1,
+                yAxisID: 'yDifficulty',
+                borderRadius: 4
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            yDifficulty: {
+                type: 'linear',
+                position: 'left',
+                title: { display: true, text: 'Difficulty (b)' }
+            },
+            yAccuracy: {
+                type: 'linear',
+                position: 'right',
+                title: { display: true, text: 'Accuracy %' },
+                min: 0,
+                max: 100,
+                grid: { drawOnChartArea: false }
+            }
+        }
+    }
+});
+
+// 3. Concept Mastery Radar / Bar
+const conceptLabels = {{ concept_stats | map(attribute='concept_tag') | list | tojson }};
+const conceptAverages = {{ concept_stats | map(attribute='average_percentage') | list | tojson }};
+
+new Chart(document.getElementById('conceptMasteryChart'), {
+    type: 'bar',
+    data: {
+        labels: conceptLabels.map(l => l.length > 20 ? l.substring(0, 18) + '...' : l),
+        datasets: [{
+            label: 'Avg Mastery %',
+            data: conceptAverages,
+            backgroundColor: conceptAverages.map(v => v >= 70 ? '#198754' : v >= 40 ? '#ffc107' : '#dc3545'),
+            borderRadius: 4
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, max: 100 } }
+    }
+});
+
+// Filter table
+document.getElementById('studentSearchInput').addEventListener('input', function(e) {
+    const val = e.target.value.toLowerCase();
+    const rows = document.querySelectorAll('#studentAttemptsTable tbody tr');
+    rows.forEach(r => {
+        const text = r.textContent.toLowerCase();
+        r.style.display = text.includes(val) ? '' : 'none';
+    });
+});
+</script>
+{% endblock %}

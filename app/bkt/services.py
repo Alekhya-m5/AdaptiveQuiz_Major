@@ -230,20 +230,26 @@ class BKTService:
             },
         }
 
-    # Backward compatibility method for legacy web quizzes
     @staticmethod
-    def theta_to_mastery(theta):
-        return 1.0 / (1.0 + math.exp(-theta))
+    def theta_to_mastery(theta: float) -> float:
+        """
+        Convert IRT theta to a continuous logistic probability via sigmoid.
+        Retained as an analytical reference utility. Not used for BKT concept
+        initialization to prevent data leakage and general-to-specific construct distortion.
+        """
+        return 1.0 / (1.0 + math.exp(-max(-35.0, min(35.0, theta))))
 
     @staticmethod
-    def update_student_mastery(attempt_id):
+    def update_student_mastery(attempt_id: int, initial_p_l0: float = DEFAULT_P_L0):
+        """
+        Incremental BKT update for online web-quiz submissions.
+        Initializes unobserved concepts with the standard independent prior (DEFAULT_P_L0 = 0.20),
+        ensuring strict mathematical and policy symmetry with batch recalculation.
+        """
         attempt = Attempt.query.get(attempt_id)
         if not attempt:
             raise ValueError("Attempt not found")
         usn = attempt.usn
-
-        theta_record = StudentTheta.query.filter_by(usn=usn).first()
-        theta = theta_record.theta if theta_record else 0.0
 
         responses = (
             Response.query.filter_by(attempt_id=attempt_id)
@@ -262,7 +268,8 @@ class BKTService:
             ).first()
 
             if mastery_record is None:
-                initial_mastery = BKTService.theta_to_mastery(theta)
+                # Use standard Corbett & Anderson concept prior DEFAULT_P_L0 (0.20)
+                initial_mastery = initial_p_l0
                 mastery_record = StudentMastery(
                     usn=usn,
                     concept_tag=concept,

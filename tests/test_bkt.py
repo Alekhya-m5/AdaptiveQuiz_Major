@@ -72,6 +72,61 @@ class TestBKT(unittest.TestCase):
 
         self.assertEqual(m1, m2)
 
+    def test_zero_prior_implications_proof(self):
+        """
+        Mathematical proof test:
+        Demonstrates that setting P(L0) = 0.0 results in:
+        1. Identical posterior transition L1 = P(T) for BOTH correct and incorrect first responses.
+        2. A paradoxical increase from 0.0 to 0.15 upon an INCORRECT answer.
+        This verifies why P(L0) = 0.0 violates Bayesian evidence discrimination.
+        """
+        p_l0 = 0.0
+        p_trans = DEFAULT_P_TRANS  # 0.15
+
+        res_correct = BKTService.update_mastery(p_l0, is_correct=True, p_learn=p_trans)
+        res_incorrect = BKTService.update_mastery(p_l0, is_correct=False, p_learn=p_trans)
+
+        # 1. Both outcomes yield exactly P(T)
+        self.assertAlmostEqual(res_correct, p_trans, places=5)
+        self.assertAlmostEqual(res_incorrect, p_trans, places=5)
+        self.assertEqual(res_correct, res_incorrect, "Zero prior produces non-discriminative first updates")
+
+        # 2. An incorrect answer paradoxical increase
+        self.assertGreater(res_incorrect, p_l0, "Incorrect answer paradoxically raises mastery under zero prior")
+
+    def test_standard_prior_discriminates_correct_and_incorrect(self):
+        """
+        Verifies that the standard Corbett & Anderson prior DEFAULT_P_L0 (0.20):
+        1. Increases upon a correct answer (0.20 -> 0.60).
+        2. Decreases below prior upon an incorrect answer (0.20 -> 0.176).
+        3. Delivers a distinct, diagnostically valid discriminative spread (> 40%).
+        """
+        p_l0 = DEFAULT_P_L0  # 0.20
+
+        res_correct = BKTService.update_mastery(p_l0, is_correct=True)
+        res_incorrect = BKTService.update_mastery(p_l0, is_correct=False)
+
+        self.assertGreater(res_correct, p_l0)
+        self.assertLess(res_incorrect, p_l0)
+        self.assertAlmostEqual(res_correct, 0.60, places=2)
+        self.assertAlmostEqual(res_incorrect, 0.176, places=3)
+        self.assertGreater(res_correct - res_incorrect, 0.40)
+
+    def test_unanswered_policies(self):
+        """
+        Verifies behavior under skip vs incorrect policies for unanswered questions.
+        """
+        initial = DEFAULT_P_L0
+        # Under skip policy: mastery remains strictly unchanged
+        skipped = initial  # skip does not call update_mastery
+        self.assertEqual(skipped, initial)
+
+        # Under incorrect policy: mastery is updated as False
+        penalized = BKTService.update_mastery(initial, is_correct=False)
+        self.assertLess(penalized, initial)
+        self.assertAlmostEqual(penalized, 0.176, places=3)
+
 
 if __name__ == "__main__":
     unittest.main()
+

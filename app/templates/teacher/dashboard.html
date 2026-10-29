@@ -6,58 +6,170 @@
     <a href="{{ url_for('teacher.create_quiz') }}" class="btn btn-success">+ Create Quiz</a>
 </div>
 
-<!-- Analytics shortcut -->
-<div class="card border-primary mb-4 mt-3 shadow-sm">
-  <div class="card-body d-flex align-items-center justify-content-between flex-wrap gap-3">
-    <div>
-      <h5 class="card-title mb-1 text-primary">IRT + BKT Student Analytics</h5>
-      <p class="card-text text-muted mb-0 small">
-        View IRT ability (θ) estimates and BKT concept mastery for all 
-        imported students across all assessment batches.
-      </p>
+<!-- Top Actions & Stats Banner -->
+<div class="row g-3 mb-4 mt-2">
+    <div class="col-md-4">
+        <div class="card p-3 h-100 shadow-sm border-primary">
+            <div class="text-muted small">Calibrated Questions (IRT)</div>
+            <div class="fs-3 fw-bold text-primary">{{ total_calibrated }}</div>
+            <div class="text-muted" style="font-size:0.75rem;">1PL Rasch Item Difficulties</div>
+        </div>
     </div>
-    <a href="{{ url_for('teacher.students_analytics') }}" class="btn btn-primary">
-      View All Students →
-    </a>
-  </div>
+    <div class="col-md-4">
+        <div class="card p-3 h-100 shadow-sm border-success">
+            <div class="text-muted small">Learner Ability Estimates (θ)</div>
+            <div class="fs-3 fw-bold text-success">{{ total_students_theta }}</div>
+            <div class="text-muted" style="font-size:0.75rem;">Newton-Raphson MLE Ability</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card p-3 h-100 shadow-sm border-info">
+            <div class="text-muted small">Concept Mastery Tracked (BKT)</div>
+            <div class="fs-3 fw-bold text-info">{{ total_mastery_records }}</div>
+            <div class="text-muted" style="font-size:0.75rem;">Student-Concept Knowledge States</div>
+        </div>
+    </div>
 </div>
 
-<h5 class="mt-4">Your Quizzes</h5>
-{% if quizzes %}
-<table class="table table-bordered bg-white">
-    <thead>
-        <tr>
-            <th>Title</th>
-            <th>Course</th>
-            <th>Questions</th>
-            <th>Status</th>
-            <th></th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for quiz in quizzes %}
-        <tr>
-            <td>{{ quiz.title }}</td>
-            <td>{{ quiz.course }}</td>
-            <td>{{ quiz.questions|length }}</td>
-            <td>
-                {% if quiz.is_published %}
-                    <span class="badge bg-success">Published</span>
-                {% else %}
-                    <span class="badge bg-secondary">Draft</span>
-                {% endif %}
-            </td>
-            <td>
-                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('teacher.quiz_detail', quiz_id=quiz.id) }}">Manage</a>
-                {% if quiz.is_published %}
-                <a class="btn btn-sm btn-outline-success" href="{{ url_for('teacher.quiz_dashboard', quiz_id=quiz.id) }}">Results</a>
-                {% endif %}
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p class="text-muted">You haven't created any quiz yet.</p>
-{% endif %}
+<!-- Curriculum Assessment Quizzes (Imported Units) -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+        <div>
+            <h5 class="mb-0 fw-bold">Curriculum Assessment Quizzes</h5>
+            <small class="text-muted">Imported unit assessments calibrated for IRT ability and BKT concept mastery.</small>
+        </div>
+        <a href="{{ url_for('teacher.students_analytics') }}" class="btn btn-outline-primary btn-sm">
+            👥 View Full Cohort Analytics →
+        </a>
+    </div>
+    <div class="card-body p-0">
+        {% if imported_quizzes %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Assessment Quiz Title</th>
+                        <th>Subject</th>
+                        <th class="text-center">Questions</th>
+                        <th class="text-center">Students</th>
+                        <th class="text-center">Total Rows</th>
+                        <th>Assessment Period</th>
+                        <th class="text-end" width="280">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for q in imported_quizzes %}
+                    <tr>
+                        <td class="fw-semibold">
+                            <span class="text-dark">{{ q.title }}</span>
+                        </td>
+                        <td><span class="badge bg-secondary">{{ q.subject }}</span></td>
+                        <td class="text-center fw-bold">{{ q.total_questions }}</td>
+                        <td class="text-center">{{ q.total_students }}</td>
+                        <td class="text-center text-muted">{{ q.total_responses }}</td>
+                        <td class="small text-muted">
+                            {% if q.first_submission %}{{ q.first_submission.strftime('%d %b %Y') }}{% endif %}
+                            {% if q.last_submission and q.last_submission != q.first_submission %} &ndash; {{ q.last_submission.strftime('%d %b %Y') }}{% endif %}
+                        </td>
+                        <td class="text-end">
+                            <div class="btn-group">
+                                <a class="btn btn-sm btn-primary" href="{{ url_for('teacher.imported_quiz_analytics', quiz=q.title) }}">
+                                    📊 View Analytics
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+                                    <span class="visually-hidden">Toggle Dropdown</span>
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end shadow">
+                                    <li><h6 class="dropdown-header">Export CSV Reports</h6></li>
+                                    <li>
+                                        <a class="dropdown-item" href="{{ url_for('teacher.export_students_csv', quiz=q.title) }}">
+                                            👥 Student Performance Summary
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" href="{{ url_for('teacher.export_questions_csv', quiz=q.title) }}">
+                                            🎯 Question-Level IRT Analysis
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" href="{{ url_for('teacher.export_mastery_csv', quiz=q.title) }}">
+                                            🧠 Student-Concept BKT Mastery
+                                        </a>
+                                    </li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <a class="dropdown-item text-muted small" href="{{ url_for('teacher.export_full_detail_csv', quiz=q.title) }}">
+                                            📑 Full Item-Level Detail
+                                        </a>
+                                    </li>
+                                </ul>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="p-4 text-center text-muted">
+            No imported assessment quizzes found. Ingest CSV assessment results to see analytics here.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Interactive Web Quizzes Section -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+        <div>
+            <h5 class="mb-0 fw-bold">Interactive Web Quizzes</h5>
+            <small class="text-muted">Quizzes created directly within the platform for real-time student attempts.</small>
+        </div>
+        <a href="{{ url_for('teacher.create_quiz') }}" class="btn btn-success btn-sm">+ Create Web Quiz</a>
+    </div>
+    <div class="card-body p-0">
+        {% if quizzes %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Title</th>
+                        <th>Course</th>
+                        <th class="text-center">Questions</th>
+                        <th>Status</th>
+                        <th class="text-end" width="180">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for quiz in quizzes %}
+                    <tr>
+                        <td class="fw-semibold">{{ quiz.title }}</td>
+                        <td>{{ quiz.course }}</td>
+                        <td class="text-center">{{ quiz.questions|length }}</td>
+                        <td>
+                            {% if quiz.is_published %}
+                                <span class="badge bg-success">Published</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Draft</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('teacher.quiz_detail', quiz_id=quiz.id) }}">Manage</a>
+                            {% if quiz.is_published %}
+                            <a class="btn btn-sm btn-outline-success" href="{{ url_for('teacher.quiz_dashboard', quiz_id=quiz.id) }}">Results</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="p-4 text-center text-muted">
+            You haven't created any live web quizzes yet.
+            <a href="{{ url_for('teacher.create_quiz') }}" class="text-decoration-none">Create your first quiz</a> to assess students in real-time.
+        </div>
+        {% endif %}
+    </div>
+</div>
 {% endblock %}

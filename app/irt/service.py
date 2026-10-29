@@ -98,7 +98,19 @@ class IRTService:
         # 1. Calibrate Item Difficulties
         # ----------------------------------------------------
         if item_scope == "first_attempt":
-            calib_records = [r for r in records_dicts if r["attempt_number"] == 1]
+            # Select the first attempt for each (student_id, quiz) pair
+            # to avoid re-test practice effects while ensuring all quizzes are calibrated
+            student_quiz_min_att = {}
+            for r in records_dicts:
+                key = (r["student_id"], r["quiz"])
+                att = r["attempt_number"]
+                if key not in student_quiz_min_att or att < student_quiz_min_att[key]:
+                    student_quiz_min_att[key] = att
+
+            calib_records = [
+                r for r in records_dicts
+                if r["attempt_number"] == student_quiz_min_att.get((r["student_id"], r["quiz"]))
+            ]
             if not calib_records:
                 calib_records = records_dicts
         else:
@@ -161,11 +173,20 @@ class IRTService:
                 db.session.add(student)
                 student_cache[usn] = student
 
-            # Ability is estimated from the student's latest assessment attempt
-            max_attempt = max(r["attempt_number"] for r in s_recs)
-            latest_recs = [r for r in s_recs if r["attempt_number"] == max_attempt]
+            # Ability is estimated by pooling the student's latest attempt from EACH quiz
+            by_quiz = defaultdict(list)
+            for r in s_recs:
+                by_quiz[r["quiz"]].append(r)
 
-            est = estimate_theta_mle(latest_recs, diff_map, min_items=1)
+            pooled_latest_recs = []
+            quiz_attempts_summary = {}
+            for quiz_title, q_recs in by_quiz.items():
+                max_att = max(r["attempt_number"] for r in q_recs)
+                quiz_latest = [r for r in q_recs if r["attempt_number"] == max_att]
+                pooled_latest_recs.extend(quiz_latest)
+                quiz_attempts_summary[quiz_title] = max_att
+
+            est = estimate_theta_mle(pooled_latest_recs, diff_map, min_items=1)
             student_estimates[usn] = est
 
             theta_record = existing_thetas.get(usn)
@@ -179,10 +200,12 @@ class IRTService:
             theta_record.responses_count = est["responses_count"]
             theta_record.correct_count = est["correct_count"]
             theta_record.estimation_status = est["status"]
-            theta_record.quizzes_attempted = max_attempt
+            theta_record.quizzes_attempted = len(by_quiz)
             theta_record.metadata_json = json.dumps({
-                "latest_attempt": max_attempt,
-                "total_responses": len(s_recs),
+                "quiz_attempts": quiz_attempts_summary,
+                "quizzes_count": len(by_quiz),
+                "pooled_responses": len(pooled_latest_recs),
+                "lifetime_responses": len(s_recs),
                 "timestamp": datetime.utcnow().isoformat(),
             })
             theta_record.updated_at = datetime.utcnow()

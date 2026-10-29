@@ -8,6 +8,7 @@ Integration tests for Adaptive Assessment Pipeline:
 """
 
 import io
+import json
 import os
 import unittest
 from datetime import datetime
@@ -183,6 +184,90 @@ class TestPipeline(unittest.TestCase):
         for m in masteries:
             self.assertTrue(0.0 <= m.mastery <= 1.0)
 
+    def test_irt_cross_quiz_different_attempt_numbers(self):
+        """
+        Regression test: Verify that when a student has different attempt numbers across quizzes
+        (e.g., Attempt 1 on Unit 1 and Attempt 2 on Unit 2), IRT pools the latest attempt from EACH quiz,
+        and item calibration properly includes Unit 2 questions.
+        """
+        multi_quiz_csv = """Rank,Attempt,Student Name,Student ID / USN,Quiz,Subject,Question No,Question ID,Concept Tag,Bloom's Level,Question,Option A,Option B,Option C,Option D,Selected Option,Correct Option,Question Marks,Marks Obtained,Total Marks,Percentage,Correct Answers,Wrong Answers,Unanswered,Violation,Violation Reason,Submitted At
+1,1,Multi Student,USN_MULTI,Unit 1,RM,1,Q_01,Concept A,Remember,Q1,A,B,C,D,A,A,1,1,2,50.0%,1,1,0,NO,,02/09/2026 8:40:12 AM
+1,1,Multi Student,USN_MULTI,Unit 1,RM,2,Q_02,Concept A,Apply,Q2,A,B,C,D,B,A,1,0,2,50.0%,1,1,0,NO,,02/09/2026 8:40:12 AM
+2,1,Other Student,USN_OTHER,Unit 1,RM,1,Q_01,Concept A,Remember,Q1,A,B,C,D,A,A,1,1,2,100.0%,2,0,0,NO,,02/09/2026 8:41:00 AM
+2,1,Other Student,USN_OTHER,Unit 1,RM,2,Q_02,Concept A,Apply,Q2,A,B,C,D,A,A,1,1,2,100.0%,2,0,0,NO,,02/09/2026 8:41:00 AM
+1,2,Multi Student,USN_MULTI,Unit 2,RM,1,Q_03,Concept B,Remember,Q3,A,B,C,D,A,A,1,1,2,100.0%,2,0,0,NO,,09/09/2026 8:40:12 AM
+1,2,Multi Student,USN_MULTI,Unit 2,RM,2,Q_04,Concept B,Apply,Q4,A,B,C,D,A,A,1,1,2,100.0%,2,0,0,NO,,09/09/2026 8:40:12 AM
+2,2,Other Student,USN_OTHER,Unit 2,RM,1,Q_03,Concept B,Remember,Q3,A,B,C,D,B,A,1,0,2,50.0%,1,1,0,NO,,09/09/2026 8:41:00 AM
+2,2,Other Student,USN_OTHER,Unit 2,RM,2,Q_04,Concept B,Apply,Q4,A,B,C,D,A,A,1,1,2,50.0%,1,1,0,NO,,09/09/2026 8:41:00 AM
+"""
+        IngestionService.import_csv(io.StringIO(multi_quiz_csv), filename="multi_unit_test.csv")
+        AdaptivePipeline.recalculate_models_only()
+
+        # 1. Item Calibration Check: All 4 questions across Unit 1 and Unit 2 must be present
+        calibs = {c.question_id: c for c in ItemCalibration.query.all()}
+        self.assertIn("Q_01", calibs)
+        self.assertIn("Q_02", calibs)
+        self.assertIn("Q_03", calibs, "Unit 2 item Q_03 must be calibrated even with Attempt=2")
+        self.assertIn("Q_04", calibs, "Unit 2 item Q_04 must be calibrated even with Attempt=2")
+
+        # 2. Student Theta Check: USN_MULTI must pool latest from Unit 1 (2 items) and Unit 2 (2 items)
+        multi_theta = StudentTheta.query.filter_by(usn="USN_MULTI").first()
+        self.assertIsNotNone(multi_theta)
+        self.assertEqual(multi_theta.quizzes_attempted, 2, "Must count exactly 2 distinct quizzes")
+        self.assertEqual(multi_theta.responses_count, 4, "Must pool 2 items from Unit 1 and 2 from Unit 2")
+        self.assertEqual(multi_theta.correct_count, 3, "3 correct (1 in Unit 1, 2 in Unit 2)")
+
+        # 3. Check JSON metadata tracking
+        meta = json.loads(multi_theta.metadata_json)
+        self.assertEqual(meta["quizzes_count"], 2)
+        self.assertEqual(meta["pooled_responses"], 4)
+        self.assertEqual(meta["quiz_attempts"]["Unit 1"], 1)
+        self.assertEqual(meta["quiz_attempts"]["Unit 2"], 2)
+
+    def test_online_and_batch_bkt_initialization_symmetry(self):
+        """
+        Verify that online web quizzes and batch recomputation initialize concepts
+        using the identical standard prior DEFAULT_P_L0 (0.20), guaranteeing policy symmetry.
+        """
+        teacher = Teacher(teacher_id="T_BKT", first_name="T", last_name="B")
+        teacher.set_password("pass")
+        student = Student(usn="USN_SYM", first_name="Sym", last_name="Metric", course="RM")
+        student.set_password("pass")
+        quiz = Quiz(title="Symmetry Quiz", teacher_id="T_BKT")
+        db.session.add_all([teacher, student, quiz])
+        db.session.flush()
+
+        q = Question(
+            quiz_id=quiz.id, question_text="What is symmetry?",
+            option_a="A", option_b="B", option_c="C", option_d="D",
+            correct_option="A", concept_tag="SymmetryConcept", topic="SymmetryTopic",
+            difficulty="Medium", difficulty_value=0.0
+        )
+        attempt = Attempt(quiz_id=quiz.id, usn="USN_SYM")
+        db.session.add_all([q, attempt])
+        db.session.flush()
+
+        resp = Response(
+            attempt_id=attempt.id, question_id=q.id,
+            selected_option="A", is_correct=True, concept_tag="SymmetryConcept"
+        )
+        db.session.add(resp)
+        db.session.commit()
+
+        # Run online incremental update
+        BKTService.update_student_mastery(attempt.id)
+
+        mastery_rec = StudentMastery.query.filter_by(usn="USN_SYM", concept_tag="SymmetryConcept").first()
+        self.assertIsNotNone(mastery_rec)
+        # Expected calculation starting from DEFAULT_P_L0 (0.20) on 1 correct answer:
+        # P(obs) = 0.20 * 0.90 + 0.80 * 0.20 = 0.34
+        # Posterior = 0.18 / 0.34 = 0.5294
+        # Next = 0.5294 + 0.4706 * 0.15 = 0.6000
+        self.assertAlmostEqual(mastery_rec.mastery, 0.60, places=2)
+        self.assertEqual(mastery_rec.attempts, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
