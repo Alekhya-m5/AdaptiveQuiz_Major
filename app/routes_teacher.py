@@ -11,10 +11,13 @@ from flask import (
 from sqlalchemy import func
 from .models import (
     ThetaHistory, db, Teacher, Quiz, Question, Attempt, Response,
-    StudentTheta, StudentMastery, Student, ImportedResponse, ItemCalibration, ImportBatch
+    StudentTheta, StudentMastery, Student, ImportedResponse, ItemCalibration, ImportBatch,
+    CourseDocument, DocumentChunk, GeneratedQuestionRecord
 )
 from .auth import teacher_required
 from .routes_student import AVAILABLE_COURSES
+from app.rag import RAGService, retrieve_context
+from app.ai import generate_adaptive_question, export_approved_dataset_jsonl, QwenLoRAModelService
 
 
 def interpret_theta(theta):
@@ -1241,4 +1244,306 @@ def export_learner_profiles_csv():
 
 # Backward-compatible endpoint alias for any legacy route references
 export_full_detail_csv = export_learner_profiles_csv
+
+
+# ---------------------------------------------------------------------------
+# RAG Course Learning Materials Management
+# ---------------------------------------------------------------------------
+
+@teacher_bp.route("/materials")
+@teacher_required
+def materials():
+    """List all uploaded course learning materials for RAG indexing."""
+    course_filter = request.args.get("course", "").strip()
+    query = CourseDocument.query
+    if course_filter:
+        query = query.filter_by(course=course_filter)
+    documents = query.order_by(CourseDocument.created_at.desc()).all()
+
+    total_chunks = db.session.query(func.count(DocumentChunk.id)).scalar() or 0
+    total_docs = len(documents)
+
+    return render_template(
+        "teacher/materials.html",
+        documents=documents,
+        total_docs=total_docs,
+        total_chunks=total_chunks,
+        courses=AVAILABLE_COURSES,
+        selected_course=course_filter,
+    )
+
+
+@teacher_bp.route("/materials/upload", methods=["POST"])
+@teacher_required
+def upload_material():
+    """Upload and ingest course learning material (PDF, PPT/PPTX, TXT)."""
+    file_obj = request.files.get("file")
+    title = request.form.get("title", "").strip()
+    course = request.form.get("course", AVAILABLE_COURSES[0]).strip()
+    topic = request.form.get("topic", "").strip() or None
+
+    if not file_obj or not file_obj.filename:
+        flash("Please select a valid document file to upload.", "danger")
+        return redirect(url_for("teacher.materials"))
+
+    try:
+        res = RAGService.ingest_document(
+            file_obj=file_obj,
+            title=title,
+            course=course,
+            topic=topic,
+            teacher_id=session["user_id"],
+        )
+        flash(f"Material successfully processed: {res['total_chunks']} chunks extracted.", "success")
+    except Exception as e:
+        flash(f"Error processing material: {str(e)}", "danger")
+
+    return redirect(url_for("teacher.materials"))
+
+
+@teacher_bp.route("/materials/<int:doc_id>/delete", methods=["POST"])
+@teacher_required
+def delete_material(doc_id):
+    """Delete a course document and its associated chunks."""
+    success = RAGService.delete_document(doc_id)
+    if success:
+        flash("Learning material and all its indexed chunks deleted successfully.", "success")
+    else:
+        flash("Document not found.", "warning")
+    return redirect(url_for("teacher.materials"))
+
+
+@teacher_bp.route("/materials/<int:doc_id>/chunks")
+@teacher_required
+def view_chunks(doc_id):
+    """View extracted structure-aware chunks and slide/page references for a document."""
+    doc = CourseDocument.query.get_or_404(doc_id)
+    chunks = DocumentChunk.query.filter_by(document_id=doc.id).order_by(DocumentChunk.chunk_index.asc()).all()
+    return render_template("teacher/material_chunks.html", doc=doc, chunks=chunks)
+
+
+# ---------------------------------------------------------------------------
+# Quality Data Collection, Generation & Teacher Review Workflow
+# ---------------------------------------------------------------------------
+
+@teacher_bp.route("/generated-questions")
+@teacher_required
+def generated_questions():
+    """Teacher review portal for AI-generated MCQs."""
+    status_filter = request.args.get("status", "all").strip().lower()
+    concept_filter = request.args.get("concept", "").strip()
+
+    query = GeneratedQuestionRecord.query
+    if status_filter != "all":
+        query = query.filter_by(validation_status=status_filter)
+    if concept_filter:
+        query = query.filter(GeneratedQuestionRecord.concept_tag.ilike(f"%{concept_filter}%"))
+
+    records = query.order_by(GeneratedQuestionRecord.created_at.desc()).all()
+
+    counts = {
+        "pending_review": GeneratedQuestionRecord.query.filter_by(validation_status="pending_review").count(),
+        "approved": GeneratedQuestionRecord.query.filter_by(validation_status="approved").count(),
+        "rejected": GeneratedQuestionRecord.query.filter_by(validation_status="rejected").count(),
+        "validation_failed": GeneratedQuestionRecord.query.filter_by(validation_status="validation_failed").count(),
+        "total": GeneratedQuestionRecord.query.count(),
+    }
+
+    model_status = QwenLoRAModelService.get_instance().get_status()
+
+    # Get available teacher quizzes to allow quick addition
+    teacher_quizzes = Quiz.query.filter_by(teacher_id=session["user_id"]).order_by(Quiz.created_at.desc()).all()
+
+    # Get available concepts from StudentMastery or ImportedResponse
+    concepts = [
+        c[0] for c in db.session.query(DocumentChunk.concept_tag)
+        .filter(DocumentChunk.concept_tag.isnot(None))
+        .distinct().all()
+    ]
+    if not concepts:
+        concepts = [
+            c[0] for c in db.session.query(StudentMastery.concept_tag).distinct().all()
+        ]
+
+    return render_template(
+        "teacher/generated_questions.html",
+        records=records,
+        counts=counts,
+        status_filter=status_filter,
+        concept_filter=concept_filter,
+        model_status=model_status,
+        teacher_quizzes=teacher_quizzes,
+        concepts=concepts,
+        courses=AVAILABLE_COURSES,
+    )
+
+
+@teacher_bp.route("/generated-questions/generate", methods=["POST"])
+@teacher_required
+def trigger_generation():
+    """Teacher triggers on-demand RAG adaptive question generation."""
+    course = request.form.get("course", "RM").strip()
+    concept_tag = request.form.get("concept_tag", "").strip()
+    target_difficulty = request.form.get("target_difficulty", "").strip() or None
+    student_usn = request.form.get("student_usn", "").strip() or None
+
+    if not concept_tag:
+        flash("Concept tag is required for question generation.", "danger")
+        return redirect(url_for("teacher.generated_questions"))
+
+    try:
+        res = generate_adaptive_question(
+            course=course,
+            concept_tag=concept_tag,
+            usn=student_usn,
+            target_difficulty_override=target_difficulty,
+        )
+        flash(f"Question generated successfully grounded in {res['source_ref']}.", "success")
+    except Exception as e:
+        flash(f"Generation error: {str(e)}", "danger")
+
+    return redirect(url_for("teacher.generated_questions"))
+
+
+@teacher_bp.route("/generated-questions/<int:record_id>/approve", methods=["POST"])
+@teacher_required
+def approve_question(record_id):
+    """Approve generated question for student presentation and future fine-tuning datasets."""
+    record = GeneratedQuestionRecord.query.get_or_404(record_id)
+    record.validation_status = "approved"
+    record.reviewed_at = datetime.utcnow()
+    record.reviewed_by = session["user_id"]
+    db.session.commit()
+    flash(f"Question #{record.id} approved and added to future LoRA training dataset pool.", "success")
+    return redirect(url_for("teacher.generated_questions"))
+
+
+@teacher_bp.route("/generated-questions/<int:record_id>/reject", methods=["POST"])
+@teacher_required
+def reject_question(record_id):
+    """Reject low-quality or inaccurate question from training pool."""
+    record = GeneratedQuestionRecord.query.get_or_404(record_id)
+    reason = request.form.get("reason", "").strip()
+    record.validation_status = "rejected"
+    record.teacher_notes = reason
+    record.reviewed_at = datetime.utcnow()
+    record.reviewed_by = session["user_id"]
+    db.session.commit()
+    flash(f"Question #{record.id} rejected.", "info")
+    return redirect(url_for("teacher.generated_questions"))
+
+
+@teacher_bp.route("/generated-questions/<int:record_id>/edit", methods=["POST"])
+@teacher_required
+def edit_generated_question(record_id):
+    """Teacher corrects/edits question wording, options, answer, or explanation, then approves."""
+    record = GeneratedQuestionRecord.query.get_or_404(record_id)
+
+    q_text = request.form.get("question_text", "").strip()
+    opt_a = request.form.get("option_a", "").strip()
+    opt_b = request.form.get("option_b", "").strip()
+    opt_c = request.form.get("option_c", "").strip()
+    opt_d = request.form.get("option_d", "").strip()
+    correct_opt = request.form.get("correct_option", "").strip().upper()
+    expl = request.form.get("explanation", "").strip()
+    diff = request.form.get("target_difficulty", record.target_difficulty).strip()
+    bloom = request.form.get("target_bloom", record.target_bloom).strip()
+    notes = request.form.get("teacher_notes", "").strip()
+
+    if not q_text or not opt_a or not opt_b or not opt_c or not opt_d:
+        flash("All question fields and four options are required.", "danger")
+        return redirect(url_for("teacher.generated_questions"))
+
+    if correct_opt not in {"A", "B", "C", "D"}:
+        flash("Correct option must be A, B, C, or D.", "danger")
+        return redirect(url_for("teacher.generated_questions"))
+
+    record.question_text = q_text
+    record.option_a = opt_a
+    record.option_b = opt_b
+    record.option_c = opt_c
+    record.option_d = opt_d
+    record.correct_option = correct_opt
+    record.explanation = expl
+    record.target_difficulty = diff
+    record.target_bloom = bloom
+    record.teacher_edited = True
+    record.teacher_notes = notes
+    record.validation_status = "approved"
+    record.reviewed_at = datetime.utcnow()
+    record.reviewed_by = session["user_id"]
+    db.session.commit()
+
+    flash(f"Question #{record.id} updated and approved as curated ground truth.", "success")
+    return redirect(url_for("teacher.generated_questions"))
+
+
+@teacher_bp.route("/generated-questions/<int:record_id>/add-to-quiz", methods=["POST"])
+@teacher_required
+def add_to_quiz(record_id):
+    """Add a validated generated MCQ directly into an existing classical quiz."""
+    record = GeneratedQuestionRecord.query.get_or_404(record_id)
+    quiz_id = request.form.get("quiz_id")
+
+    if not quiz_id:
+        flash("Select a quiz to add this question to.", "danger")
+        return redirect(url_for("teacher.generated_questions"))
+
+    quiz = Quiz.query.get_or_404(int(quiz_id))
+    if quiz.teacher_id != session["user_id"]:
+        abort(403)
+
+    max_order = max((q.order_index for q in quiz.questions), default=-1)
+
+    diff_val_map = {"Easy": -1.0, "Medium": 0.0, "Hard": 1.0}
+
+    new_q = Question(
+        quiz_id=quiz.id,
+        order_index=max_order + 1,
+        question_text=record.question_text,
+        option_a=record.option_a,
+        option_b=record.option_b,
+        option_c=record.option_c,
+        option_d=record.option_d,
+        correct_option=record.correct_option,
+        concept_tag=record.concept_tag,
+        topic=record.topic or record.concept_tag,
+        difficulty=record.target_difficulty,
+        difficulty_value=diff_val_map.get(record.target_difficulty, 0.0),
+        marks=1.0,
+    )
+    db.session.add(new_q)
+    db.session.commit()
+    flash(f"Question added to '{quiz.title}'.", "success")
+    return redirect(url_for("teacher.generated_questions"))
+
+
+# ---------------------------------------------------------------------------
+# Future LoRA Fine-Tuning Dataset Export (Phase 8)
+# ---------------------------------------------------------------------------
+
+@teacher_bp.route("/export/lora-dataset.jsonl")
+@teacher_required
+def export_lora_dataset_jsonl():
+    """
+    Export all teacher-approved generated MCQs into JSONL format
+    specifically structured for supervised fine-tuning (SFT) of Qwen + LoRA.
+    Guarantees no PII and strictly approved ground truth.
+    """
+    approved_records = (
+        GeneratedQuestionRecord.query
+        .filter_by(validation_status="approved")
+        .order_by(GeneratedQuestionRecord.created_at.asc())
+        .all()
+    )
+
+    jsonl_content = export_approved_dataset_jsonl(approved_records)
+    filename = "lora_fine_tuning_dataset.jsonl"
+
+    return FlaskResponse(
+        jsonl_content,
+        mimetype="application/jsonlines",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
 

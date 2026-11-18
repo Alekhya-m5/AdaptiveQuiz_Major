@@ -350,3 +350,101 @@ class ItemCalibration(db.Model):
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+
+class CourseDocument(db.Model):
+    """
+    Teacher-uploaded course learning materials (PDF, PPT/PPTX, TXT)
+    for RAG retrieval and adaptive question generation.
+    """
+    __tablename__ = "course_documents"
+
+    id = db.Column(db.Integer, primary_key=True)
+    teacher_id = db.Column(db.String(30), db.ForeignKey("teachers.teacher_id"), nullable=True)
+    title = db.Column(db.String(255), nullable=False)
+    filename = db.Column(db.String(255), nullable=False)
+    file_type = db.Column(db.String(20), nullable=False)  # 'pdf', 'pptx', 'ppt', 'txt'
+    file_path = db.Column(db.String(500), nullable=True)
+    file_size = db.Column(db.Integer, default=0)
+    course = db.Column(db.String(50), nullable=False, default="RM", index=True)
+    topic = db.Column(db.String(120), nullable=True)
+    total_pages_or_slides = db.Column(db.Integer, default=0)
+    total_chunks = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(30), default="PROCESSED", nullable=False)  # 'PROCESSED', 'FAILED', 'EMPTY'
+    error_message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    chunks = db.relationship(
+        "DocumentChunk", backref="document", lazy=True, cascade="all, delete-orphan",
+        order_by="DocumentChunk.chunk_index"
+    )
+
+
+class DocumentChunk(db.Model):
+    """
+    Extracted, structure-aware text chunks with page/slide metadata
+    and persistent embedding representation for semantic retrieval.
+    """
+    __tablename__ = "document_chunks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    document_id = db.Column(db.Integer, db.ForeignKey("course_documents.id"), nullable=False, index=True)
+    chunk_index = db.Column(db.Integer, nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    page_number = db.Column(db.Integer, nullable=True)
+    slide_number = db.Column(db.Integer, nullable=True)
+    course = db.Column(db.String(50), nullable=False, default="RM", index=True)
+    topic = db.Column(db.String(120), nullable=True)
+    concept_tag = db.Column(db.String(120), nullable=True, index=True)
+    token_count = db.Column(db.Integer, default=0)
+    embedding_json = db.Column(db.Text, nullable=True)  # JSON-serialized embedding vector
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class GeneratedQuestionRecord(db.Model):
+    """
+    Quality data collection record for every generated MCQ.
+    Captures prompt, retrieved source context, learner parameters (theta/BKT),
+    generation output, validation results, and teacher review state.
+    Serves as the curated pool for future LoRA fine-tuning datasets.
+    """
+    __tablename__ = "generated_question_records"
+
+    id = db.Column(db.Integer, primary_key=True)
+    course = db.Column(db.String(50), nullable=False, default="RM", index=True)
+    topic = db.Column(db.String(120), nullable=True)
+    concept_tag = db.Column(db.String(120), nullable=False, index=True)
+    learner_theta = db.Column(db.Float, nullable=True)
+    learner_mastery = db.Column(db.Float, nullable=True)
+    target_difficulty = db.Column(db.String(20), nullable=False, default="Medium")
+    target_bloom = db.Column(db.String(50), nullable=True)
+
+    source_context = db.Column(db.Text, nullable=True)
+    prompt_text = db.Column(db.Text, nullable=True)
+    retrieved_chunk_ids = db.Column(db.Text, nullable=True)  # JSON list of chunk IDs
+
+    question_text = db.Column(db.Text, nullable=False)
+    option_a = db.Column(db.String(500), nullable=False)
+    option_b = db.Column(db.String(500), nullable=False)
+    option_c = db.Column(db.String(500), nullable=False)
+    option_d = db.Column(db.String(500), nullable=False)
+    correct_option = db.Column(db.String(1), nullable=False)  # 'A', 'B', 'C', 'D'
+    explanation = db.Column(db.Text, nullable=False)
+
+    source_document_id = db.Column(db.Integer, db.ForeignKey("course_documents.id"), nullable=True)
+    source_filename = db.Column(db.String(255), nullable=True)
+    source_page_or_slide = db.Column(db.String(50), nullable=True)
+
+    model_name = db.Column(db.String(100), default="Qwen/Qwen3-0.6B")
+    adapter_version = db.Column(db.String(100), default="pilot_lora_v1")
+
+    # Workflow statuses: 'generated', 'validation_failed', 'pending_review', 'approved', 'rejected'
+    validation_status = db.Column(db.String(30), default="pending_review", nullable=False, index=True)
+    validation_notes = db.Column(db.Text, nullable=True)
+    teacher_edited = db.Column(db.Boolean, default=False, nullable=False)
+    teacher_notes = db.Column(db.Text, nullable=True)
+    quality_score = db.Column(db.Float, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    reviewed_by = db.Column(db.String(30), nullable=True)

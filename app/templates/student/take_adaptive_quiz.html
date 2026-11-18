@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Adaptive Practice - {{ concept }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-9">
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+            <div>
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb mb-1 small">
+                        <li class="breadcrumb-item"><a href="{{ url_for('student.adaptive_quiz') }}">Adaptive Setup</a></li>
+                        <li class="breadcrumb-item active">{{ concept }}</li>
+                    </ol>
+                </nav>
+                <h3 class="mb-1">Personalized Practice Session</h3>
+                <p class="text-muted mb-0">Topic: <span class="badge bg-secondary">{{ concept }}</span> | Current Ability &theta;: <code>{{ '%.2f'|format(current_theta) }}</code></p>
+            </div>
+            <span class="badge bg-primary px-3 py-2 fs-6">{{ questions|length }} Question{{ 's' if questions|length > 1 else '' }}</span>
+        </div>
+
+        <form method="POST" action="{{ url_for('student.submit_adaptive_quiz') }}">
+            <input type="hidden" name="concept" value="{{ concept }}">
+
+            {% for q in questions %}
+                <input type="hidden" name="record_ids[]" value="{{ q.record_id }}">
+                <div class="card shadow-sm mb-4 border-primary">
+                    <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-primary">Question {{ loop.index }} of {{ questions|length }}</span>
+                            <span class="badge bg-info text-dark">{{ q.target_difficulty }}</span>
+                            <span class="badge bg-light text-dark border">{{ q.target_bloom }}</span>
+                        </div>
+                        <div class="small text-muted">
+                            📖 Grounded in: <strong>{{ q.source_ref }}</strong>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <h5 class="fw-bold mb-4">{{ q.question_text }}</h5>
+
+                        <div class="d-flex flex-column gap-2">
+                            {% for opt_key, opt_text in [('A', q.option_a), ('B', q.option_b), ('C', q.option_c), ('D', q.option_d)] %}
+                                <label class="border rounded p-3 d-flex align-items-start gap-2 cursor-pointer hover-bg-light" style="cursor: pointer;">
+                                    <input type="radio" name="choice_{{ q.record_id }}" value="{{ opt_key }}" class="form-check-input mt-1" required>
+                                    <div>
+                                        <strong class="me-1">{{ opt_key }}.</strong> {{ opt_text }}
+                                    </div>
+                                </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+
+            <div class="d-flex justify-content-between align-items-center mt-4 mb-5">
+                <a href="{{ url_for('student.adaptive_quiz') }}" class="btn btn-outline-secondary" onclick="return confirm('Cancel practice session?');">
+                    Cancel
+                </a>
+                <button type="submit" class="btn btn-success btn-lg px-5 fw-bold">
+                    ✓ Submit Answers &amp; View Analysis
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

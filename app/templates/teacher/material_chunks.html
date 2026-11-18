@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Chunks for {{ doc.title or doc.filename }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1 small">
+                <li class="breadcrumb-item"><a href="{{ url_for('teacher.materials') }}">Course Materials</a></li>
+                <li class="breadcrumb-item active" aria-current="page">{{ doc.title or doc.filename }}</li>
+            </ol>
+        </nav>
+        <h3 class="mb-1">Document Chunks &amp; Citations</h3>
+        <p class="text-muted mb-0">Inspecting structure-aware chunks and slide/page citations for <strong>{{ doc.filename }}</strong></p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('teacher.materials') }}" class="btn btn-outline-secondary btn-sm">
+            ← Back to Materials
+        </a>
+        <a href="{{ url_for('teacher.generated_questions') }}" class="btn btn-primary btn-sm">
+            🤖 AI Question Review →
+        </a>
+    </div>
+</div>
+
+<!-- Document Summary Card -->
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <span class="text-muted small d-block">Document Title</span>
+                <span class="fw-bold">{{ doc.title or doc.filename }}</span>
+            </div>
+            <div class="col-md-2">
+                <span class="text-muted small d-block">Course</span>
+                <span class="badge bg-secondary">{{ doc.course }}</span>
+            </div>
+            <div class="col-md-2">
+                <span class="text-muted small d-block">Topic / Concept</span>
+                <span>{{ doc.topic or 'General' }}</span>
+            </div>
+            <div class="col-md-2">
+                <span class="text-muted small d-block">Indexed Chunks</span>
+                <span class="badge bg-primary fs-6">{{ chunks|length }}</span>
+            </div>
+            <div class="col-md-3">
+                <span class="text-muted small d-block">Uploaded At</span>
+                <span class="small">{{ doc.created_at.strftime('%Y-%m-%d %H:%M') if doc.created_at else 'N/A' }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Chunks List -->
+<div class="card shadow-sm">
+    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+        <h6 class="mb-0 fw-bold">Document Chunks ({{ chunks|length }})</h6>
+        <span class="small text-muted">Each chunk includes persistent page/slide citation for MCQ grounding</span>
+    </div>
+    <div class="card-body p-0">
+        {% if chunks %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 80px;"># Index</th>
+                        <th style="width: 130px;">Citation Source</th>
+                        <th style="width: 100px;">Tokens</th>
+                        <th>Chunk Content (Semantic Context)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for chunk in chunks %}
+                    <tr>
+                        <td>
+                            <span class="badge bg-light text-dark border">#{{ chunk.chunk_index }}</span>
+                        </td>
+                        <td>
+                            {% if chunk.slide_number %}
+                                <span class="badge bg-warning text-dark">Slide {{ chunk.slide_number }}</span>
+                            {% elif chunk.page_number %}
+                                <span class="badge bg-info text-dark">Page {{ chunk.page_number }}</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Section</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="small text-muted">{{ chunk.token_count }} tokens</span>
+                        </td>
+                        <td>
+                            <div class="p-2 bg-light rounded font-monospace small" style="white-space: pre-wrap; max-height: 180px; overflow-y: auto;">{{ chunk.content }}</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <p class="mb-0">No chunks indexed for this document.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

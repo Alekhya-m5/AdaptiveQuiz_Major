@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Practice Results - {{ concept }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-9">
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+            <div>
+                <h3 class="mb-1">📊 Adaptive Practice Analysis</h3>
+                <p class="text-muted mb-0">Topic: <span class="badge bg-secondary">{{ concept }}</span></p>
+            </div>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('student.adaptive_quiz') }}" class="btn btn-outline-primary btn-sm">
+                    🔄 Practice Again
+                </a>
+                <a href="{{ url_for('student.analytics') }}" class="btn btn-primary btn-sm">
+                    📈 View Full Analytics
+                </a>
+            </div>
+        </div>
+
+        <!-- Ability & Mastery Impact Card -->
+        <div class="card shadow-sm mb-4 border-success">
+            <div class="card-header bg-success text-white py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold">Dynamic IRT &amp; BKT Update</span>
+                <span>Score: {{ total_correct }} / {{ total_questions }} ({{ '%.0f'|format(total_correct / total_questions * 100) if total_questions > 0 else 0 }}%)</span>
+            </div>
+            <div class="card-body">
+                <div class="row g-4 text-center">
+                    <div class="col-md-6 border-end">
+                        <span class="text-muted small d-block">IRT Overall Ability (&theta;)</span>
+                        <div class="d-flex justify-content-center align-items-center gap-2 mt-1">
+                            <span class="text-muted fs-5">{{ '%.3f'|format(theta_before) }}</span>
+                            <span class="fs-5">→</span>
+                            <span class="fw-bold fs-4 {{ 'text-success' if theta_after >= theta_before else 'text-danger' }}">
+                                {{ '%.3f'|format(theta_after) }}
+                            </span>
+                            {% set theta_diff = theta_after - theta_before %}
+                            <span class="badge {{ 'bg-success' if theta_diff >= 0 else 'bg-danger' }}">
+                                {{ '+' if theta_diff > 0 else '' }}{{ '%.3f'|format(theta_diff) }}
+                            </span>
+                        </div>
+                        <span class="text-muted small mt-1 d-block">Updated via dynamic item calibration</span>
+                    </div>
+
+                    <div class="col-md-6">
+                        <span class="text-muted small d-block">BKT Concept Mastery ({{ concept }})</span>
+                        <div class="d-flex justify-content-center align-items-center gap-2 mt-1">
+                            <span class="text-muted fs-5">{{ '%.1f'|format(mastery_before * 100) }}%</span>
+                            <span class="fs-5">→</span>
+                            <span class="fw-bold fs-4 {{ 'text-success' if mastery_after >= mastery_before else 'text-danger' }}">
+                                {{ '%.1f'|format(mastery_after * 100) }}%
+                            </span>
+                            {% set mastery_diff = (mastery_after - mastery_before) * 100 %}
+                            <span class="badge {{ 'bg-success' if mastery_diff >= 0 else 'bg-danger' }}">
+                                {{ '+' if mastery_diff > 0 else '' }}{{ '%.1f'|format(mastery_diff) }}%
+                            </span>
+                        </div>
+                        <span class="text-muted small mt-1 d-block">Bayesian Knowledge Tracing belief state</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detailed Question Review -->
+        <h5 class="fw-bold mb-3">Question Breakdown &amp; Grounded Citations</h5>
+
+        <div class="d-flex flex-column gap-3 mb-5">
+            {% for item in results %}
+                {% set rec = item.record %}
+                <div class="card shadow-sm border-{{ 'success' if item.is_correct else 'danger' }}">
+                    <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div>
+                            <span class="badge {{ 'bg-success' if item.is_correct else 'bg-danger' }} me-2">
+                                {{ '✓ Correct' if item.is_correct else '✗ Incorrect' }}
+                            </span>
+                            <span class="badge bg-light text-dark border">{{ rec.target_difficulty }}</span>
+                            <span class="badge bg-light text-dark border">{{ rec.target_bloom }}</span>
+                        </div>
+                        <div class="small text-muted">
+                            📖 Grounded in: <strong>{{ item.source_ref }}</strong>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <h6 class="fw-bold mb-3">{{ rec.question_text }}</h6>
+
+                        <div class="row g-2 mb-3">
+                            {% for opt_key, opt_text in [('A', rec.option_a), ('B', rec.option_b), ('C', rec.option_c), ('D', rec.option_d)] %}
+                                {% set is_user = (item.user_choice == opt_key) %}
+                                {% set is_right = (rec.correct_option == opt_key) %}
+                                <div class="col-md-6">
+                                    <div class="p-2 border rounded {{ 'bg-success bg-opacity-10 border-success fw-bold' if is_right else ('bg-danger bg-opacity-10 border-danger' if is_user else 'bg-light') }}">
+                                        <strong>{{ opt_key }}.</strong> {{ opt_text }}
+                                        {% if is_right %}<span class="badge bg-success ms-1">✓ Correct Answer</span>{% endif %}
+                                        {% if is_user and not is_right %}<span class="badge bg-danger ms-1">Your Choice</span>{% endif %}
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="alert alert-light border py-2 px-3 small mb-0">
+                            <strong>Explanation:</strong> {{ item.explanation }}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="text-center mb-5">
+            <a href="{{ url_for('student.adaptive_quiz') }}" class="btn btn-primary btn-lg px-4">
+                🚀 Continue Practicing
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

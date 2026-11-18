@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Adaptive Practice Quiz{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+            <div>
+                <h3 class="mb-1">🎯 Personalized Adaptive Practice</h3>
+                <p class="text-muted mb-0">RAG-grounded MCQs tailored to your IRT ability &theta; and BKT concept mastery.</p>
+            </div>
+            <div>
+                <a href="{{ url_for('student.analytics') }}" class="btn btn-outline-secondary btn-sm">
+                    📊 My Analytics
+                </a>
+            </div>
+        </div>
+
+        <!-- Student Profile Overview Card -->
+        <div class="card shadow-sm mb-4 border-info">
+            <div class="card-header bg-info bg-opacity-10 py-2">
+                <span class="fw-bold text-dark small">🧠 Your Adaptive Learner Profile</span>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 text-center">
+                    <div class="col-sm-4 border-end">
+                        <span class="text-muted small d-block">Current Ability (&theta;)</span>
+                        <span class="fs-4 fw-bold text-primary">{{ '%.2f'|format(current_theta) }}</span>
+                        <span class="d-block text-muted small">IRT 1PL Estimate</span>
+                    </div>
+                    <div class="col-sm-4 border-end">
+                        <span class="text-muted small d-block">Target Challenge</span>
+                        <span class="fs-4 fw-bold">
+                            {% if current_theta >= 1.0 %}
+                                <span class="badge bg-danger">Hard</span>
+                            {% elif current_theta >= -0.5 %}
+                                <span class="badge bg-warning text-dark">Medium</span>
+                            {% else %}
+                                <span class="badge bg-success">Easy</span>
+                            {% endif %}
+                        </span>
+                        <span class="d-block text-muted small">Calibrated Difficulty</span>
+                    </div>
+                    <div class="col-sm-4">
+                        <span class="text-muted small d-block">Growth Opportunity</span>
+                        <span class="fw-bold text-dark d-block mt-1">{{ recommended_concept }}</span>
+                        <span class="badge bg-light text-secondary border">Needs Practice</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Setup Form Card -->
+        <div class="card shadow-sm border-primary">
+            <div class="card-header bg-primary text-white py-2">
+                <h6 class="mb-0 fw-bold">Configure Practice Session</h6>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('student.adaptive_quiz') }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Select Concept / Topic to Practice</label>
+                        <select name="concept" class="form-select" required>
+                            {% if recommended_concept %}
+                                <option value="{{ recommended_concept }}" selected>
+                                    ⭐ {{ recommended_concept }} (Recommended for you)
+                                </option>
+                            {% endif %}
+                            {% for c in all_concepts %}
+                                {% if c != recommended_concept %}
+                                    <option value="{{ c }}">{{ c }}</option>
+                                {% endif %}
+                            {% endfor %}
+                        </select>
+                        <div class="form-text small">
+                            Questions are dynamically retrieved from teacher course slides and notes for this concept.
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold small">Number of Practice Questions</label>
+                        <div class="d-flex gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="num_questions" id="nq1" value="1" checked>
+                                <label class="form-check-label" for="nq1">1 Question (Quick Check)</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="num_questions" id="nq2" value="2">
+                                <label class="form-check-label" for="nq2">2 Questions</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="num_questions" id="nq3" value="3">
+                                <label class="form-check-label" for="nq3">3 Questions</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary py-2 fw-bold">
+                            🚀 Generate Grounded Adaptive Quiz
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <div class="card-footer bg-light py-2 text-muted small text-center">
+                Questions are generated in real-time by Qwen + LoRA using semantic retrieval from official course materials.
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
