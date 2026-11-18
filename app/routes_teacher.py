@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import re
 from collections import defaultdict
@@ -45,6 +46,16 @@ def interpret_mastery(mastery):
 def safe_filename(name):
     clean = re.sub(r"[^\w\-]+", "_", name).strip("_")
     return clean or "quiz_report"
+
+
+def anonymize_student_id(usn: str) -> str:
+    """
+    Generate a stable, anonymized pseudonymous identifier for a student USN.
+    Uses SHA-256 to ensure determinism across exports without exposing any PII.
+    """
+    clean_usn = (usn or "").strip().upper()
+    hash_str = hashlib.sha256(clean_usn.encode("utf-8")).hexdigest()[:10].upper()
+    return f"STUDENT_{hash_str}"
 
 
 teacher_bp = Blueprint("teacher", __name__)
@@ -1108,116 +1119,126 @@ def export_mastery_csv():
     )
 
 
+@teacher_bp.route("/export/learner-profiles")
+@teacher_bp.route("/imported-quiz/export/learner-profiles")
 @teacher_bp.route("/imported-quiz/export/full")
 @teacher_required
-def export_full_detail_csv():
+def export_learner_profiles_csv():
     """
-    Export Full Item-Level Detail CSV for all individual student-question responses
-    in the selected quiz, joined with IRT item difficulty, student theta, and concept mastery.
-    """
-    quiz_title = request.args.get("quiz", "").strip()
-    if not quiz_title:
-        abort(404, description="Quiz parameter is required.")
+    Export consolidated Learner Profile CSV for LoRA fine-tuning and SLM personalization.
+    Format: ONE row per student-concept combination.
+    Columns:
+      1. student_key       - anonymized, stable pseudonymous learner identifier
+      2. subject_or_course - subject/course to distinguish concepts and guide RAG retrieval
+      3. irt_theta         - student's overall cumulative IRT ability estimate
+      4. concept_tag       - the specific curriculum concept
+      5. bkt_mastery       - latest BKT mastery probability P(L) for that concept
+      6. bkt_attempts      - cumulative observation opportunities presented for that concept
+      7. bkt_correct_count - cumulative correct responses for that concept
 
-    responses = (
-        ImportedResponse.query.filter_by(quiz=quiz_title)
-        .order_by(
-            ImportedResponse.attempt_number.asc(),
-            ImportedResponse.student_id.asc(),
-            ImportedResponse.question_no.asc()
-        )
+    Strictly excludes:
+      Student names, USNs, emails, question text, selected answers, options, marks,
+      timestamps, violation records, or question-level duplicate rows.
+    """
+    quiz_filter = request.args.get("quiz", "").strip()
+
+    target_student_ids = None
+    target_concepts = None
+    if quiz_filter:
+        quiz_resps = ImportedResponse.query.filter_by(quiz=quiz_filter).all()
+        if not quiz_resps:
+            abort(404, description=f"Assessment quiz '{quiz_filter}' not found.")
+        target_student_ids = {r.student_id for r in quiz_resps}
+        target_concepts = {r.concept_tag for r in quiz_resps if r.concept_tag}
+
+    # Fetch concept to subject mapping from ImportedResponse
+    concept_subject_rows = (
+        db.session.query(ImportedResponse.concept_tag, ImportedResponse.subject)
+        .filter(ImportedResponse.concept_tag.isnot(None))
+        .distinct()
         .all()
     )
-    if not responses:
-        abort(404, description=f"Assessment quiz '{quiz_title}' not found.")
-
-    student_ids = {r.student_id for r in responses}
-    question_ids = {r.question_id for r in responses}
-    concept_tags = {r.concept_tag for r in responses if r.concept_tag}
-
-    student_lookup = {s.usn: s for s in Student.query.filter(Student.usn.in_(student_ids)).all()}
-    theta_lookup = {t.usn: t for t in StudentTheta.query.filter(StudentTheta.usn.in_(student_ids)).all()}
-    calibrations = {
-        c.question_id: c
-        for c in ItemCalibration.query.filter(ItemCalibration.question_id.in_(question_ids)).all()
+    concept_to_subject = {
+        row.concept_tag: row.subject
+        for row in concept_subject_rows
+        if row.concept_tag
     }
-    mastery_lookup = {
-        (m.usn, m.concept_tag): m
-        for m in StudentMastery.query.filter(
-            StudentMastery.usn.in_(student_ids),
-            StudentMastery.concept_tag.in_(concept_tags)
-        ).all()
+
+    # Query latest valid StudentMastery records
+    mastery_query = StudentMastery.query
+    if target_student_ids is not None:
+        mastery_query = mastery_query.filter(StudentMastery.usn.in_(target_student_ids))
+    if target_concepts is not None:
+        mastery_query = mastery_query.filter(StudentMastery.concept_tag.in_(target_concepts))
+
+    mastery_records = (
+        mastery_query
+        .order_by(StudentMastery.usn.asc(), StudentMastery.concept_tag.asc())
+        .all()
+    )
+
+    all_usns = {m.usn for m in mastery_records}
+    thetas = {
+        st.usn: st
+        for st in StudentTheta.query.filter(StudentTheta.usn.in_(all_usns)).all()
+    }
+    students = {
+        s.usn: s
+        for s in Student.query.filter(Student.usn.in_(all_usns)).all()
     }
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow([
-        "Student_ID_USN",
-        "Student_Name",
-        "Quiz_Title",
-        "Subject",
-        "Attempt_Number",
-        "Question_Number",
-        "Question_ID",
-        "Concept_Tag",
-        "Bloom_Level",
-        "Calibrated_Difficulty_b",
-        "Is_Correct",
-        "Is_Unanswered",
-        "Selected_Option",
-        "Correct_Option",
-        "Marks_Obtained",
-        "Maximum_Marks",
-        "Submission_Timestamp",
-        "Cumulative_IRT_Theta",
-        "Current_Concept_Mastery",
+        "student_key",
+        "subject_or_course",
+        "irt_theta",
+        "concept_tag",
+        "bkt_mastery",
+        "bkt_attempts",
+        "bkt_correct_count",
     ])
 
-    for r in responses:
-        st_obj = student_lookup.get(r.student_id)
-        st_name = (
-            st_obj.full_name
-            if (st_obj and st_obj.first_name != r.student_id)
-            else (r.student_name if r.student_name else r.student_id)
+    sorted_records = sorted(
+        mastery_records,
+        key=lambda m: (anonymize_student_id(m.usn), m.concept_tag)
+    )
+
+    for m in sorted_records:
+        s_key = anonymize_student_id(m.usn)
+        subj = concept_to_subject.get(
+            m.concept_tag,
+            students.get(m.usn).course if (m.usn in students and students[m.usn].course) else "RM and IPR"
         )
-
-        cal = calibrations.get(r.question_id)
-        diff_b = round(cal.difficulty_b, 4) if cal else ""
-
-        theta_rec = theta_lookup.get(r.student_id)
-        theta_val = round(theta_rec.theta, 4) if theta_rec else ""
-
-        m_rec = mastery_lookup.get((r.student_id, r.concept_tag))
-        mastery_val = round(m_rec.mastery, 4) if m_rec else ""
-
-        sub_time_str = r.submitted_at.strftime("%Y-%m-%d %H:%M:%S") if r.submitted_at else ""
+        theta_rec = thetas.get(m.usn)
+        theta_val = round(theta_rec.theta, 4) if (theta_rec and theta_rec.theta is not None) else ""
+        mastery_val = round(m.mastery, 4) if m.mastery is not None else ""
+        attempts_val = m.attempts if m.attempts is not None else 0
+        correct_val = m.correct_count if m.correct_count is not None else 0
 
         writer.writerow([
-            r.student_id,
-            st_name,
-            quiz_title,
-            r.subject,
-            r.attempt_number,
-            r.question_no,
-            r.question_id,
-            r.concept_tag,
-            r.bloom_level or "N/A",
-            diff_b,
-            1 if r.is_correct else 0,
-            1 if r.is_unanswered else 0,
-            r.selected_option or "",
-            r.correct_option or "",
-            r.marks_obtained,
-            r.question_marks,
-            sub_time_str,
+            s_key,
+            subj,
             theta_val,
+            m.concept_tag,
             mastery_val,
+            attempts_val,
+            correct_val,
         ])
 
-    filename = f"{safe_filename(quiz_title)}_full_item_detail.csv"
+    filename = (
+        f"{safe_filename(quiz_filter)}_learner_personalization_profiles.csv"
+        if quiz_filter
+        else "learner_personalization_profiles.csv"
+    )
+
     return FlaskResponse(
         buffer.getvalue(),
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+# Backward-compatible endpoint alias for any legacy route references
+export_full_detail_csv = export_learner_profiles_csv
 

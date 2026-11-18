@@ -38,9 +38,14 @@
             <h5 class="mb-0 fw-bold">Curriculum Assessment Quizzes</h5>
             <small class="text-muted">Imported unit assessments calibrated for IRT ability and BKT concept mastery.</small>
         </div>
-        <a href="{{ url_for('teacher.students_analytics') }}" class="btn btn-outline-primary btn-sm">
-            👥 View Full Cohort Analytics →
-        </a>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('teacher.export_learner_profiles_csv') }}" class="btn btn-outline-success btn-sm">
+                📥 Export Learner Profiles (CSV)
+            </a>
+            <a href="{{ url_for('teacher.students_analytics') }}" class="btn btn-outline-primary btn-sm">
+                👥 View Full Cohort Analytics →
+            </a>
+        </div>
     </div>
     <div class="card-body p-0">
         {% if imported_quizzes %}
@@ -98,8 +103,8 @@
                                     </li>
                                     <li><hr class="dropdown-divider"></li>
                                     <li>
-                                        <a class="dropdown-item text-muted small" href="{{ url_for('teacher.export_full_detail_csv', quiz=q.title) }}">
-                                            📑 Full Item-Level Detail
+                                        <a class="dropdown-item" href="{{ url_for('teacher.export_learner_profiles_csv', quiz=q.title) }}">
+                                            🧠 Learner Profiles (LoRA / SLM)
                                         </a>
                                     </li>
                                 </ul>

@@ -342,7 +342,9 @@ class TestTeacherDashboard(unittest.TestCase):
             "/teacher/imported-quiz/export/students?quiz=Unit-1+Assessment",
             "/teacher/imported-quiz/export/questions?quiz=Unit-1+Assessment",
             "/teacher/imported-quiz/export/mastery?quiz=Unit-1+Assessment",
+            "/teacher/imported-quiz/export/learner-profiles?quiz=Unit-1+Assessment",
             "/teacher/imported-quiz/export/full?quiz=Unit-1+Assessment",
+            "/teacher/export/learner-profiles",
         ]
         for url in protected_endpoints:
             res = self.client.get(url, follow_redirects=False)
@@ -563,12 +565,14 @@ class TestTeacherDashboard(unittest.TestCase):
         self.assertEqual(bob_hyp[6], "Needs Work (< 40%)")
 
     # -------------------------------------------------------------
-    # 8. Full Item-Level Detail CSV
+    # 8. Consolidated Learner Personalization Profiles CSV
     # -------------------------------------------------------------
-    def test_export_full_detail_csv(self):
-        """Full item-level CSV must include all student-question responses joined with IRT & BKT."""
+    def test_export_learner_profiles_csv(self):
+        """Learner profiles CSV must export one row per student-concept pair with theta and mastery, no PII."""
         self._login_teacher()
-        res = self.client.get("/teacher/imported-quiz/export/full?quiz=Unit-1+Assessment")
+        
+        # Test 1: Quiz-scoped export via /teacher/imported-quiz/export/learner-profiles
+        res = self.client.get("/teacher/imported-quiz/export/learner-profiles?quiz=Unit-1+Assessment")
         self.assertEqual(res.status_code, 200)
 
         csv_text = res.get_data(as_text=True)
@@ -576,36 +580,47 @@ class TestTeacherDashboard(unittest.TestCase):
         headers = reader[0]
 
         expected_headers = [
-            "Student_ID_USN",
-            "Student_Name",
-            "Quiz_Title",
-            "Subject",
-            "Attempt_Number",
-            "Question_Number",
-            "Question_ID",
-            "Concept_Tag",
-            "Bloom_Level",
-            "Calibrated_Difficulty_b",
-            "Is_Correct",
-            "Is_Unanswered",
-            "Selected_Option",
-            "Correct_Option",
-            "Marks_Obtained",
-            "Maximum_Marks",
-            "Submission_Timestamp",
-            "Cumulative_IRT_Theta",
-            "Current_Concept_Mastery",
+            "student_key",
+            "subject_or_course",
+            "irt_theta",
+            "concept_tag",
+            "bkt_mastery",
+            "bkt_attempts",
+            "bkt_correct_count",
         ]
         self.assertEqual(headers, expected_headers)
 
         rows = reader[1:]
-        self.assertEqual(len(rows), 6)  # 6 individual question responses in Unit-1
+        # Exactly 4 student-concept rows (2 students x 2 concepts in Unit-1), NOT 6 question rows
+        self.assertEqual(len(rows), 4)
 
-        # Check unanswered flag on Bob's Q2
-        bob_q2 = [r for r in rows if r[0] == "USN_BOB" and r[6] == "Q_U1_02"][0]
-        self.assertEqual(bob_q2[10], "0")  # is_correct
-        self.assertEqual(bob_q2[11], "1")  # is_unanswered
-        self.assertEqual(bob_q2[18], "0.2") # current mastery
+        # Confirm no PII appears anywhere in the output
+        for r in rows:
+            row_str = " ".join(r)
+            self.assertNotIn("USN_ALICE", row_str)
+            self.assertNotIn("USN_BOB", row_str)
+            self.assertNotIn("Alice", row_str)
+            self.assertNotIn("Bob", row_str)
+            # student_key must match STUDENT_<hash>
+            self.assertTrue(r[0].startswith("STUDENT_"))
+
+        # Verify Alice's records (theta = 1.35 repeated on both concepts)
+        alice_key = rows[0][0]  # sorted by student_key
+        # Check that unique student keys count is 2
+        unique_keys = set(r[0] for r in rows)
+        self.assertEqual(len(unique_keys), 2)
+
+        # Check legacy endpoint alias /teacher/imported-quiz/export/full works identically
+        res_legacy = self.client.get("/teacher/imported-quiz/export/full?quiz=Unit-1+Assessment")
+        self.assertEqual(res_legacy.status_code, 200)
+        self.assertEqual(res_legacy.get_data(as_text=True), csv_text)
+
+        # Test 2: Global cohort export via /teacher/export/learner-profiles (no quiz param)
+        res_global = self.client.get("/teacher/export/learner-profiles")
+        self.assertEqual(res_global.status_code, 200)
+        reader_global = list(csv.reader(io.StringIO(res_global.get_data(as_text=True))))
+        self.assertEqual(reader_global[0], expected_headers)
+        self.assertEqual(len(reader_global[1:]), 4)
 
     # -------------------------------------------------------------
     # 9. Missing Data & Empty / Non-Existent Quiz Handling

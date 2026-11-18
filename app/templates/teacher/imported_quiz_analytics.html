@@ -42,8 +42,8 @@
                 </li>
                 <li><hr class="dropdown-divider"></li>
                 <li>
-                    <a class="dropdown-item text-muted small" href="{{ url_for('teacher.export_full_detail_csv', quiz=quiz_title) }}">
-                        📑 Full Item-Level Detail (All Responses)
+                    <a class="dropdown-item" href="{{ url_for('teacher.export_learner_profiles_csv', quiz=quiz_title) }}">
+                        📑 Learner Profiles (LoRA / SLM)
                     </a>
                 </li>
             </ul>
