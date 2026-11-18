@@ -319,7 +319,7 @@ class TestRAGPipeline(unittest.TestCase):
         mock_service = mock.MagicMock()
         mock_service.is_loaded.return_value = True
         mock_service.base_model_name = "Qwen/Qwen3-0.6B"
-        mock_service.adapter_path = "/Users/lokeshk/Downloads/fine_tuned_qwen_lora"
+        mock_service.adapter_path = "models/fine_tuned_qwen_lora"
         mock_service.generate.return_value = json.dumps({
             "question": "What is stratified sampling based on course materials?",
             "option_a": "Divides a heterogeneous population into homogeneous subgroups called strata",

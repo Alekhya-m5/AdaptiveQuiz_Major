@@ -8,13 +8,22 @@ Engineered for Mac 8 GB RAM with graceful error isolation.
 import json
 import logging
 import os
+from pathlib import Path
 import time
 from typing import Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_MODEL = os.getenv("BASE_MODEL_NAME", "Qwen/Qwen3-0.6B")
-DEFAULT_ADAPTER_PATH = os.getenv("LORA_ADAPTER_PATH", "/Users/lokeshk/Downloads/fine_tuned_qwen_lora")
+
+# Resolve default adapter path: env var -> local models/ dir -> user's home Downloads dir -> fallback
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_CANDIDATE_PATHS = [
+    _PROJECT_ROOT / "models" / "fine_tuned_qwen_lora",
+    Path.home() / "Downloads" / "fine_tuned_qwen_lora",
+]
+_DEFAULT_ADAPTER = next((str(p) for p in _CANDIDATE_PATHS if p.exists()), "models/fine_tuned_qwen_lora")
+DEFAULT_ADAPTER_PATH = os.getenv("LORA_ADAPTER_PATH", _DEFAULT_ADAPTER)
 
 
 class QwenLoRAModelService:

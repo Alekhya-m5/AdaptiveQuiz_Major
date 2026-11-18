@@ -5,7 +5,10 @@ Smoke test for CSV ingestion processor.
 from pathlib import Path
 from app.ingestion.processor import process_weekly_csv
 
-FILE_PATH = Path("/Users/lokeshk/Downloads/Unit-1_Quiz_02-09-2026_Detailed_Results.csv")
+PROJECT_ROOT = Path(__file__).resolve().parent
+FILE_PATH = PROJECT_ROOT / "data" / "assessments" / "Unit-1_Quiz_02-09-2026_Detailed_Results.csv"
+if not FILE_PATH.exists():
+    FILE_PATH = Path.home() / "Downloads" / "Unit-1_Quiz_02-09-2026_Detailed_Results.csv"
 
 if __name__ == "__main__":
     if FILE_PATH.exists():

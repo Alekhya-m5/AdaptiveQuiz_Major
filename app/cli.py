@@ -14,6 +14,70 @@ from app.pipeline import AdaptivePipeline
 from app.models import ImportBatch, ItemCalibration, StudentTheta, StudentMastery, ImportedResponse
 
 
+def import_all_assessments(data_dir: Path = None):
+    """
+    Discovers and imports all assessment CSVs from data/assessments/,
+    then recalculates IRT and BKT models end-to-end.
+    Safe and idempotent: skips files already imported.
+    """
+    if data_dir is None:
+        data_dir = Path(__file__).resolve().parent.parent / "data" / "assessments"
+
+    if not data_dir.exists():
+        print(f"Data directory '{data_dir}' does not exist.")
+        return {"status": "ERROR", "message": f"Directory not found: {data_dir}"}
+
+    csv_files = sorted(list(data_dir.glob("*.csv")))
+    if not csv_files:
+        print(f"No CSV files found in '{data_dir}'.")
+        return {"status": "NO_FILES", "files": []}
+
+    print(f"\nDiscovered {len(csv_files)} assessment file(s) in {data_dir}:")
+    for f in csv_files:
+        print(f" - {f.name}")
+
+    results = []
+    for csv_file in csv_files:
+        print(f"\nProcessing '{csv_file.name}'...")
+        res = IngestionService.import_csv(str(csv_file))
+        status = res.get("status")
+        if status == "SUCCESS":
+            print(f"  [SUCCESS] Imported {res.get('valid_rows')} rows ({res.get('student_count')} students, {res.get('question_count')} questions).")
+        elif status == "DUPLICATE":
+            print(f"  [SKIPPED] Already imported in batch #{res.get('batch_id')} (Idempotent).")
+        else:
+            print(f"  [{status}] {res.get('message', '')}")
+        results.append(res)
+
+    print("\nRecalculating IRT and BKT models on all cumulative responses...")
+    model_res = AdaptivePipeline.recalculate_models_only()
+    print(f"  IRT: {model_res['irt']['items_calibrated']} items calibrated across {model_res['irt']['students_estimated']} students.")
+    print(f"  BKT: {model_res['bkt']['student_concepts_updated']} student-concept mastery pairs updated.")
+
+    batches = ImportBatch.query.all()
+    responses = ImportedResponse.query.count()
+    calibrations = ItemCalibration.query.all()
+    thetas = StudentTheta.query.all()
+    masteries = StudentMastery.query.all()
+
+    print("\n================ ASSESSMENT INITIALIZATION COMPLETE ================")
+    print(f"Total Import Batches: {len(batches)}")
+    for b in batches:
+        print(f"  Batch #{b.id}: {b.filename} | Status: {b.status} | Rows: {b.valid_rows}/{b.total_rows}")
+    print(f"Total Imported Responses: {responses}")
+    print(f"Total Calibrated Items: {len(calibrations)}")
+    print(f"Total Students with Theta: {len(thetas)}")
+    print(f"Total Student-Concept Mastery Records: {len(masteries)}")
+    print("====================================================================\n")
+
+    return {
+        "status": "SUCCESS",
+        "files_processed": len(csv_files),
+        "ingestion_results": results,
+        "models": model_res,
+    }
+
+
 def register_cli_commands(app):
     """Register CLI commands with Flask app."""
 
@@ -26,6 +90,13 @@ def register_cli_commands(app):
         csv_path = sys.argv[2]
         res = IngestionService.import_csv(csv_path)
         print(json.dumps(res, indent=2, default=str))
+
+    @app.cli.command("import-all-assessments")
+    def cli_import_all_assessments():
+        """Import all assessment CSVs from data/assessments/ and recalculate IRT/BKT models."""
+        custom_dir = sys.argv[2] if len(sys.argv) >= 3 else None
+        dir_path = Path(custom_dir) if custom_dir else None
+        import_all_assessments(dir_path)
 
     @app.cli.command("recalculate-models")
     def cli_recalculate_models():
@@ -94,11 +165,18 @@ def main():
     # show-summary
     subparsers.add_parser("show-summary", help="Show database summary statistics")
 
+    # import-all-assessments
+    p_all = subparsers.add_parser("import-all-assessments", help="Import all assessment CSVs from data/assessments/")
+    p_all.add_argument("--dir", type=str, default=None, help="Optional custom data directory")
+
     args = parser.parse_args()
     app = create_app()
 
     with app.app_context():
-        if args.command == "import-csv":
+        if args.command == "import-all-assessments":
+            dir_path = Path(args.dir) if args.dir else None
+            import_all_assessments(dir_path)
+        elif args.command == "import-csv":
             res = IngestionService.import_csv(args.csv_path)
             print(json.dumps(res, indent=2, default=str))
         elif args.command == "recalculate-models":

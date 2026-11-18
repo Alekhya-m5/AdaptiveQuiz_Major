@@ -152,10 +152,13 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(mastery_1, mastery_2)
 
     def test_end_to_end_supplied_csv(self):
-        # Locate the actual Unit-1 CSV
-        csv_path = Path("/Users/lokeshk/Downloads/Unit-1_Quiz_02-09-2026_Detailed_Results.csv")
+        # Locate the actual Unit-1 CSV in data/assessments/ or fallback to Downloads
+        project_root = Path(__file__).resolve().parent.parent
+        csv_path = project_root / "data" / "assessments" / "Unit-1_Quiz_02-09-2026_Detailed_Results.csv"
         if not csv_path.exists():
-            self.skipTest("Supplied CSV not found in /Users/lokeshk/Downloads/")
+            csv_path = Path.home() / "Downloads" / "Unit-1_Quiz_02-09-2026_Detailed_Results.csv"
+        if not csv_path.exists():
+            self.skipTest("Supplied Unit-1 CSV not found")
 
         res = AdaptivePipeline.run_pipeline(str(csv_path))
 
@@ -183,6 +186,26 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(len(masteries), 64 * 11)  # 64 students x 11 concepts = 704 records
         for m in masteries:
             self.assertTrue(0.0 <= m.mastery <= 1.0)
+
+    def test_end_to_end_unit_2_csv(self):
+        # Locate the actual Unit-2 CSV in data/assessments/ or fallback to Downloads
+        project_root = Path(__file__).resolve().parent.parent
+        csv_path = project_root / "data" / "assessments" / "Unit-2_18-09-2026_Detailed_Results.csv"
+        if not csv_path.exists():
+            csv_path = Path.home() / "Downloads" / "Unit-2_18-09-2026_Detailed_Results.csv"
+        if not csv_path.exists():
+            self.skipTest("Supplied Unit-2 CSV not found")
+
+        res = AdaptivePipeline.run_pipeline(str(csv_path))
+
+        self.assertEqual(res["status"], "SUCCESS")
+        self.assertEqual(res["ingestion"]["valid_rows"], 2100)
+        self.assertEqual(res["ingestion"]["question_count"], 20)
+        self.assertEqual(res["ingestion"]["student_count"], 60)
+
+        # 20 items calibrated
+        self.assertEqual(res["irt"]["items_calibrated"], 20)
+        self.assertEqual(res["irt"]["students_estimated"], 60)
 
     def test_irt_cross_quiz_different_attempt_numbers(self):
         """
