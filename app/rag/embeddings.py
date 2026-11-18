@@ -112,3 +112,4 @@ def cosine_similarity(v1: Union[List[float], np.ndarray], v2: Union[List[float],
         return 0.0
 
     return float(np.dot(a, b) / (norm_a * norm_b))
+

@@ -243,3 +243,4 @@ def extract_document(
         return extract_from_txt(file_input)
     else:
         raise UnsupportedFormatError(f"Unsupported extension: {ext}")
+

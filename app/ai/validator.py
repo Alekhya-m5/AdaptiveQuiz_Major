@@ -148,3 +148,4 @@ def validate_mcq_data(
 
     is_valid = len(errors) == 0
     return is_valid, errors, normalized
+

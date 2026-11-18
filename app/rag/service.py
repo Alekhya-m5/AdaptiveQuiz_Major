@@ -171,3 +171,4 @@ class RAGService:
         db.session.delete(doc)
         db.session.commit()
         return True
+

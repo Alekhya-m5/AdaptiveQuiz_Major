@@ -134,3 +134,4 @@ class AdaptiveEngine:
             "mastery_used": round(effective_mastery, 4),
             "pedagogical_rationale": rationale,
         }
+

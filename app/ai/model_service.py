@@ -182,7 +182,8 @@ class QwenLoRAModelService:
         start_time = time.time()
         try:
             inputs = self.tokenizer(prompt, return_tensors="pt")
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            # Filter out token_type_ids which causal LMs like Qwen do not accept
+            inputs = {k: v.to(self.device) for k, v in inputs.items() if k != "token_type_ids"}
 
             with torch.no_grad():
                 outputs = self.model.generate(

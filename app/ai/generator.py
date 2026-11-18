@@ -294,3 +294,4 @@ def generate_adaptive_question(
         "validation_status": validation_status,
         "pedagogical_rationale": challenge["pedagogical_rationale"],
     }
+
