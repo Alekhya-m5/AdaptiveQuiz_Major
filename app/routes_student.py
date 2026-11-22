@@ -72,7 +72,12 @@ def login():
 @student_required
 def dashboard():
     student = Student.query.get_or_404(session["user_id"])
-    quizzes = Quiz.query.filter_by(course=student.course, is_published=True).order_by(Quiz.created_at).all()
+    quizzes = (
+        Quiz.query.filter_by(course=student.course, is_published=True)
+        .filter((Quiz.assigned_usn == None) | (Quiz.assigned_usn == student.usn))
+        .order_by(Quiz.created_at.desc())
+        .all()
+    )
 
     attempted_quiz_ids = {
         a.quiz_id for a in Attempt.query.filter_by(usn=student.usn).all()
@@ -94,6 +99,10 @@ def take_quiz(quiz_id):
 
     if not quiz.is_published or quiz.course != student.course:
         abort(404)
+
+    # Strictly isolate: only the assigned student or public course quizzes can be taken
+    if quiz.assigned_usn and quiz.assigned_usn != student.usn:
+        abort(403)
 
     existing = Attempt.query.filter_by(quiz_id=quiz.id, usn=student.usn).first()
     if existing:

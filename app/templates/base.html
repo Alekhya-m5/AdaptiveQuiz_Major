@@ -20,7 +20,7 @@
                 {% elif session.get('role') == 'teacher' %}
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('teacher.dashboard') }}">Dashboard</a>
                     <a class="btn btn-outline-info btn-sm" href="{{ url_for('teacher.materials') }}">📚 Course Materials</a>
-                    <a class="btn btn-outline-warning btn-sm" href="{{ url_for('teacher.generated_questions') }}">🤖 AI Questions &amp; Review</a>
+                    <a class="btn btn-outline-warning btn-sm" href="{{ url_for('teacher.generated_questions') }}">🤖 AI Question Generator</a>
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('teacher.students_analytics') }}">All Students</a>
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('teacher.create_quiz') }}">Create Quiz</a>
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('common.logout') }}">Logout</a>

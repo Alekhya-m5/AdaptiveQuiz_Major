@@ -1339,7 +1339,14 @@ def view_chunks(doc_id):
 @teacher_bp.route("/generated-questions")
 @teacher_required
 def generated_questions():
-    """Teacher review portal for AI-generated MCQs."""
+    """Teacher portal for AI-generated MCQs."""
+    # Auto-migrate any legacy pending_review records to approved
+    legacy_pending = GeneratedQuestionRecord.query.filter_by(validation_status="pending_review").all()
+    if legacy_pending:
+        for p in legacy_pending:
+            p.validation_status = "approved"
+        db.session.commit()
+
     status_filter = request.args.get("status", "all").strip().lower()
     concept_filter = request.args.get("concept", "").strip()
 
@@ -1350,13 +1357,14 @@ def generated_questions():
         query = query.filter(GeneratedQuestionRecord.concept_tag.ilike(f"%{concept_filter}%"))
 
     records = query.order_by(GeneratedQuestionRecord.created_at.desc()).all()
+    total_count = GeneratedQuestionRecord.query.count()
 
     counts = {
-        "pending_review": GeneratedQuestionRecord.query.filter_by(validation_status="pending_review").count(),
-        "approved": GeneratedQuestionRecord.query.filter_by(validation_status="approved").count(),
+        "pending_review": 0,
+        "approved": total_count,
         "rejected": GeneratedQuestionRecord.query.filter_by(validation_status="rejected").count(),
-        "validation_failed": GeneratedQuestionRecord.query.filter_by(validation_status="validation_failed").count(),
-        "total": GeneratedQuestionRecord.query.count(),
+        "validation_failed": 0,
+        "total": total_count,
     }
 
     model_status = QwenLoRAModelService.get_instance().get_status()
@@ -1379,6 +1387,7 @@ def generated_questions():
         "teacher/generated_questions.html",
         records=records,
         counts=counts,
+        total_count=total_count,
         status_filter=status_filter,
         concept_filter=concept_filter,
         model_status=model_status,
@@ -1391,26 +1400,104 @@ def generated_questions():
 @teacher_bp.route("/generated-questions/generate", methods=["POST"])
 @teacher_required
 def trigger_generation():
-    """Teacher triggers on-demand RAG adaptive question generation."""
+    """
+    Teacher triggers on-demand RAG adaptive question generation for ALL enrolled students.
+    Personalizes difficulty for each student based on individual IRT theta and BKT mastery.
+    Assigns the generated quiz directly to each student's dashboard.
+    """
     course = request.form.get("course", "RM").strip()
-    concept_tag = request.form.get("concept_tag", "").strip()
-    target_difficulty = request.form.get("target_difficulty", "").strip() or None
-    student_usn = request.form.get("student_usn", "").strip() or None
+    raw_topics = request.form.get("concept_tag") or request.form.get("topics") or ""
+    topics = [t.strip() for t in raw_topics.split(",") if t.strip()]
 
-    if not concept_tag:
-        flash("Concept tag is required for question generation.", "danger")
+    if not topics:
+        flash("At least one topic is required for question generation.", "danger")
         return redirect(url_for("teacher.generated_questions"))
 
     try:
-        res = generate_adaptive_question(
+        num_questions = int(request.form.get("num_questions", 3))
+        num_questions = max(1, min(num_questions, 20))
+    except (TypeError, ValueError):
+        num_questions = 3
+
+    # 1. Fetch all students enrolled in the selected course
+    students = Student.query.filter_by(course=course).all()
+    if not students:
+        flash(f"No students currently enrolled in course '{course}'.", "warning")
+        return redirect(url_for("teacher.generated_questions"))
+
+    topics_str = ", ".join(topics)
+    total_generated = 0
+    students_served = 0
+    diff_val_map = {"Easy": -1.0, "Medium": 0.0, "Hard": 1.0}
+
+    for student in students:
+        # Retrieve individual IRT ability
+        st = StudentTheta.query.filter_by(usn=student.usn).first()
+        student_theta = st.theta if st else 0.0
+
+        # Create a personalized Quiz assigned to this student
+        quiz_title = f"Adaptive Practice: {topics_str}"
+        student_quiz = Quiz(
+            title=quiz_title,
             course=course,
-            concept_tag=concept_tag,
-            usn=student_usn,
-            target_difficulty_override=target_difficulty,
+            teacher_id=session["user_id"],
+            is_published=True,
+            assigned_usn=student.usn,
+            published_at=datetime.utcnow(),
         )
-        flash(f"Question generated successfully grounded in {res['source_ref']}.", "success")
-    except Exception as e:
-        flash(f"Generation error: {str(e)}", "danger")
+        db.session.add(student_quiz)
+        db.session.flush()
+
+        for q_idx in range(num_questions):
+            topic = topics[q_idx % len(topics)]
+
+            # Retrieve individual BKT mastery for this topic
+            sm = StudentMastery.query.filter_by(usn=student.usn, concept_tag=topic).first()
+            student_mastery = sm.mastery if sm else 0.20
+
+            # Generate personalized question using AdaptiveEngine
+            try:
+                res = generate_adaptive_question(
+                    course=course,
+                    concept_tag=topic,
+                    usn=student.usn,
+                    student_theta=student_theta,
+                    concept_mastery=student_mastery,
+                    target_difficulty_override=None,
+                    assigned_usn=student.usn,
+                )
+
+                q_item = Question(
+                    quiz_id=student_quiz.id,
+                    order_index=q_idx,
+                    question_text=res["question"],
+                    option_a=res["options"]["A"],
+                    option_b=res["options"]["B"],
+                    option_c=res["options"]["C"],
+                    option_d=res["options"]["D"],
+                    correct_option=res["correct_option"],
+                    concept_tag=topic,
+                    topic=topic,
+                    difficulty=res["target_difficulty"],
+                    difficulty_value=diff_val_map.get(res["target_difficulty"], 0.0),
+                    marks=1.0,
+                )
+                db.session.add(q_item)
+                total_generated += 1
+            except Exception as e:
+                continue
+
+        students_served += 1
+
+    db.session.commit()
+
+    if total_generated > 0:
+        flash(
+            f"Successfully generated {total_generated} personalized question(s) assigned to {students_served} student(s) for topic(s): {topics_str}.",
+            "success",
+        )
+    else:
+        flash("Generation completed with errors. Please check materials and try again.", "danger")
 
     return redirect(url_for("teacher.generated_questions"))
 

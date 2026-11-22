@@ -78,8 +78,11 @@ class Quiz(db.Model):
     course = db.Column(db.String(50), nullable=False, default="RM")
     teacher_id = db.Column(db.String(30), db.ForeignKey("teachers.teacher_id"), nullable=False)
     is_published = db.Column(db.Boolean, default=False, nullable=False)
+    assigned_usn = db.Column(db.String(50), db.ForeignKey("students.usn"), nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     published_at = db.Column(db.DateTime, nullable=True)
+
+    assigned_student = db.relationship("Student", backref="assigned_quizzes", foreign_keys=[assigned_usn])
 
     questions = db.relationship(
         "Question", backref="quiz", lazy=True,
@@ -437,9 +440,10 @@ class GeneratedQuestionRecord(db.Model):
 
     model_name = db.Column(db.String(100), default="Qwen/Qwen3-0.6B")
     adapter_version = db.Column(db.String(100), default="pilot_lora_v1")
+    assigned_usn = db.Column(db.String(50), db.ForeignKey("students.usn"), nullable=True, index=True)
 
     # Workflow statuses: 'generated', 'validation_failed', 'pending_review', 'approved', 'rejected'
-    validation_status = db.Column(db.String(50), default="pending_review", nullable=False, index=True)
+    validation_status = db.Column(db.String(50), default="approved", nullable=False, index=True)
     validation_notes = db.Column(db.Text, nullable=True)
     teacher_edited = db.Column(db.Boolean, default=False, nullable=False)
     teacher_notes = db.Column(db.Text, nullable=True)

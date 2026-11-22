@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}AI Generated Questions Review &amp; LoRA Dataset{% endblock %}
+{% block title %}AI Generated Questions &amp; LoRA Dataset{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <div>
-        <h3 class="mb-1">🤖 AI Question Review &amp; LoRA Training Hub</h3>
-        <p class="text-muted mb-0">Review, edit, and approve RAG-generated MCQs grounded in uploaded materials for student practice and SFT fine-tuning.</p>
+        <h3 class="mb-1">🤖 AI Question Generator &amp; LoRA Training Hub</h3>
+        <p class="text-muted mb-0">Generate RAG-grounded MCQs from uploaded materials for student practice and SFT fine-tuning.</p>
     </div>
     <div class="d-flex gap-2">
         <a href="{{ url_for('teacher.materials') }}" class="btn btn-outline-secondary btn-sm">
@@ -13,7 +13,7 @@
         </a>
         <a href="{{ url_for('teacher.export_lora_dataset_jsonl') }}" class="btn btn-success btn-sm fw-bold">
             📥 Download LoRA Dataset (.jsonl)
-            <span class="badge bg-light text-dark ms-1">{{ counts.approved }} Approved</span>
+            <span class="badge bg-light text-dark ms-1">{{ counts.total }} Questions</span>
         </a>
     </div>
 </div>
@@ -47,8 +47,9 @@
     <!-- On-Demand Question Generator Card -->
     <div class="col-lg-8">
         <div class="card shadow-sm h-100 border-primary">
-            <div class="card-header bg-primary text-white py-2">
-                <span class="fw-bold small">⚡ On-Demand Adaptive MCQ Generator</span>
+            <div class="card-header bg-primary text-white py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold small">⚡ On-Demand Adaptive MCQ Generator (All Enrolled Students)</span>
+                <span class="badge bg-light text-primary small">Auto IRT &amp; BKT Calibration</span>
             </div>
             <div class="card-body py-2">
                 <form action="{{ url_for('teacher.trigger_generation') }}" method="POST">
@@ -61,31 +62,22 @@
                                 {% endfor %}
                             </select>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label small fw-bold mb-1">Concept Tag</label>
-                            <input type="text" name="concept_tag" class="form-control form-control-sm" list="conceptList" placeholder="e.g. Sampling" required>
+                        <div class="col-md-5">
+                            <label class="form-label small fw-bold mb-1">Topic(s) <span class="text-muted fw-normal">(comma-separated)</span></label>
+                            <input type="text" name="concept_tag" class="form-control form-control-sm" list="conceptList" placeholder="e.g. Sampling, Hypothesis Testing" required>
                             <datalist id="conceptList">
                                 {% for c in concepts %}
                                     <option value="{{ c }}">
                                 {% endfor %}
                             </datalist>
                         </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold mb-1">Questions / Student</label>
+                            <input type="number" name="num_questions" class="form-control form-control-sm" min="1" max="20" value="3" placeholder="3" required>
+                        </div>
                         <div class="col-md-3">
-                            <label class="form-label small fw-bold mb-1">Student USN (Opt.)</label>
-                            <input type="text" name="student_usn" class="form-control form-control-sm" placeholder="e.g. 1RV21CS001">
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label small fw-bold mb-1">Difficulty</label>
-                            <select name="target_difficulty" class="form-select form-select-sm">
-                                <option value="">Auto (IRT+BKT)</option>
-                                <option value="Easy">Easy</option>
-                                <option value="Medium">Medium</option>
-                                <option value="Hard">Hard</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
                             <button type="submit" class="btn btn-primary btn-sm w-100">
-                                🚀 Generate
+                                🚀 Generate for All Students
                             </button>
                         </div>
                     </div>
@@ -95,33 +87,18 @@
     </div>
 </div>
 
-<!-- Filters and Filter Badges -->
+<!-- Questions List Header & Concept Filter -->
 <div class="card shadow-sm mb-4">
     <div class="card-body py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <div class="d-flex gap-2 flex-wrap">
-            <a href="{{ url_for('teacher.generated_questions', status='all') }}" class="btn btn-sm {{ 'btn-dark' if status_filter == 'all' else 'btn-outline-dark' }}">
-                All ({{ counts.total }})
-            </a>
-            <a href="{{ url_for('teacher.generated_questions', status='pending_review') }}" class="btn btn-sm {{ 'btn-warning text-dark' if status_filter == 'pending_review' else 'btn-outline-warning text-dark' }}">
-                Pending Review ({{ counts.pending_review }})
-            </a>
-            <a href="{{ url_for('teacher.generated_questions', status='approved') }}" class="btn btn-sm {{ 'btn-success' if status_filter == 'approved' else 'btn-outline-success' }}">
-                Approved ({{ counts.approved }})
-            </a>
-            <a href="{{ url_for('teacher.generated_questions', status='rejected') }}" class="btn btn-sm {{ 'btn-danger' if status_filter == 'rejected' else 'btn-outline-danger' }}">
-                Rejected ({{ counts.rejected }})
-            </a>
-            <a href="{{ url_for('teacher.generated_questions', status='validation_failed') }}" class="btn btn-sm {{ 'btn-secondary' if status_filter == 'validation_failed' else 'btn-outline-secondary' }}">
-                Failed Checks ({{ counts.validation_failed }})
-            </a>
+        <div class="d-flex align-items-center gap-2">
+            <span class="fw-bold small">Generated Questions ({{ records|length }})</span>
         </div>
         <div>
             <form method="GET" action="{{ url_for('teacher.generated_questions') }}" class="d-flex gap-1">
-                <input type="hidden" name="status" value="{{ status_filter }}">
                 <input type="text" name="concept" class="form-control form-control-sm" placeholder="Filter by concept..." value="{{ concept_filter }}">
                 <button type="submit" class="btn btn-sm btn-outline-secondary">Filter</button>
                 {% if concept_filter %}
-                    <a href="{{ url_for('teacher.generated_questions', status=status_filter) }}" class="btn btn-sm btn-light">Clear</a>
+                    <a href="{{ url_for('teacher.generated_questions') }}" class="btn btn-sm btn-light">Clear</a>
                 {% endif %}
             </form>
         </div>
@@ -132,21 +109,18 @@
 {% if records %}
     <div class="d-flex flex-column gap-3 mb-5">
         {% for q in records %}
-        <div class="card shadow-sm border-{{ 'success' if q.validation_status == 'approved' else ('danger' if q.validation_status == 'rejected' else ('warning' if q.validation_status == 'pending_review' else 'secondary')) }}">
+        <div class="card shadow-sm">
             <div class="card-header bg-light d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2">
                     <span class="badge bg-dark">#{{ q.id }}</span>
                     <span class="badge bg-primary">{{ q.course }}</span>
                     <span class="badge bg-secondary">{{ q.concept_tag }}</span>
                     <span class="badge bg-info text-dark">{{ q.target_difficulty }} ({{ q.target_bloom }})</span>
-                    {% if q.teacher_edited %}
-                        <span class="badge bg-dark text-warning">✏️ Edited by Teacher</span>
+                    {% if q.assigned_usn %}
+                        <span class="badge bg-success">👤 Assigned: {{ q.assigned_usn }}</span>
                     {% endif %}
                 </div>
                 <div class="d-flex align-items-center gap-2">
-                    <span class="badge {{ 'bg-success' if q.validation_status == 'approved' else ('bg-danger' if q.validation_status == 'rejected' else 'bg-warning text-dark') }}">
-                        {{ q.validation_status|upper }}
-                    </span>
                     <span class="text-muted small">{{ q.created_at.strftime('%Y-%m-%d %H:%M') if q.created_at else '' }}</span>
                 </div>
             </div>
@@ -204,12 +178,6 @@
                     <strong>Explanation:</strong> {{ q.explanation }}
                 </div>
 
-                {% if q.teacher_notes %}
-                    <div class="text-muted small mb-3">
-                        <strong>Teacher Notes:</strong> <em>{{ q.teacher_notes }}</em>
-                    </div>
-                {% endif %}
-
                 <!-- Collapsible Retrieved Source Chunk -->
                 <div class="accordion accordion-flush mb-3" id="accordionChunk{{ q.id }}">
                     <div class="accordion-item border rounded">
@@ -226,33 +194,9 @@
                     </div>
                 </div>
 
-                <!-- Review Actions & Add to Quiz Form -->
-                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 pt-2 border-top">
-                    <!-- Approval & Rejection buttons -->
-                    <div class="d-flex gap-2 align-items-center">
-                        {% if q.validation_status != 'approved' %}
-                            <form action="{{ url_for('teacher.approve_question', record_id=q.id) }}" method="POST" class="d-inline">
-                                <button type="submit" class="btn btn-sm btn-success">
-                                    ✓ Approve for LoRA Dataset
-                                </button>
-                            </form>
-                        {% else %}
-                            <span class="text-success small fw-bold">✓ Approved in Dataset Pool</span>
-                        {% endif %}
-
-                        <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ q.id }}">
-                            ✏️ Edit &amp; Curate
-                        </button>
-
-                        {% if q.validation_status != 'rejected' %}
-                            <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#rejectModal{{ q.id }}">
-                                ✗ Reject
-                            </button>
-                        {% endif %}
-                    </div>
-
-                    <!-- Add to existing quiz -->
-                    {% if teacher_quizzes %}
+                <!-- Add to Classical Quiz (if quizzes exist) -->
+                {% if teacher_quizzes %}
+                <div class="d-flex justify-content-end align-items-center pt-2 border-top">
                     <form action="{{ url_for('teacher.add_to_quiz', record_id=q.id) }}" method="POST" class="d-flex gap-1 align-items-center">
                         <select name="quiz_id" class="form-select form-select-sm" style="width: auto;" required>
                             <option value="">-- Add to Classical Quiz --</option>
@@ -262,109 +206,8 @@
                         </select>
                         <button type="submit" class="btn btn-sm btn-secondary">Add</button>
                     </form>
-                    {% endif %}
                 </div>
-            </div>
-        </div>
-
-        <!-- Edit Modal -->
-        <div class="modal fade" id="editModal{{ q.id }}" tabindex="-1" aria-labelledby="editModalLabel{{ q.id }}" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <form action="{{ url_for('teacher.edit_generated_question', record_id=q.id) }}" method="POST">
-                        <div class="modal-header">
-                            <h5 class="modal-title" id="editModalLabel{{ q.id }}">Edit &amp; Curate Question #{{ q.id }}</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="mb-3">
-                                <label class="form-label small fw-bold">Question Text</label>
-                                <textarea name="question_text" class="form-control" rows="3" required>{{ q.question_text }}</textarea>
-                            </div>
-                            <div class="row g-2 mb-3">
-                                <div class="col-md-6">
-                                    <label class="form-label small fw-bold">Option A</label>
-                                    <input type="text" name="option_a" class="form-control form-control-sm" value="{{ q.option_a }}" required>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label small fw-bold">Option B</label>
-                                    <input type="text" name="option_b" class="form-control form-control-sm" value="{{ q.option_b }}" required>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label small fw-bold">Option C</label>
-                                    <input type="text" name="option_c" class="form-control form-control-sm" value="{{ q.option_c }}" required>
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label small fw-bold">Option D</label>
-                                    <input type="text" name="option_d" class="form-control form-control-sm" value="{{ q.option_d }}" required>
-                                </div>
-                            </div>
-                            <div class="row g-2 mb-3">
-                                <div class="col-md-4">
-                                    <label class="form-label small fw-bold">Correct Option</label>
-                                    <select name="correct_option" class="form-select form-select-sm" required>
-                                        <option value="A" {{ 'selected' if q.correct_option == 'A' else '' }}>A</option>
-                                        <option value="B" {{ 'selected' if q.correct_option == 'B' else '' }}>B</option>
-                                        <option value="C" {{ 'selected' if q.correct_option == 'C' else '' }}>C</option>
-                                        <option value="D" {{ 'selected' if q.correct_option == 'D' else '' }}>D</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-4">
-                                    <label class="form-label small fw-bold">Target Difficulty</label>
-                                    <select name="target_difficulty" class="form-select form-select-sm">
-                                        <option value="Easy" {{ 'selected' if q.target_difficulty == 'Easy' else '' }}>Easy</option>
-                                        <option value="Medium" {{ 'selected' if q.target_difficulty == 'Medium' else '' }}>Medium</option>
-                                        <option value="Hard" {{ 'selected' if q.target_difficulty == 'Hard' else '' }}>Hard</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-4">
-                                    <label class="form-label small fw-bold">Bloom's Level</label>
-                                    <select name="target_bloom" class="form-select form-select-sm">
-                                        <option value="Remember" {{ 'selected' if q.target_bloom == 'Remember' else '' }}>Remember</option>
-                                        <option value="Understand" {{ 'selected' if q.target_bloom == 'Understand' else '' }}>Understand</option>
-                                        <option value="Apply" {{ 'selected' if q.target_bloom == 'Apply' else '' }}>Apply</option>
-                                        <option value="Analyze" {{ 'selected' if q.target_bloom == 'Analyze' else '' }}>Analyze</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label small fw-bold">Explanation</label>
-                                <textarea name="explanation" class="form-control" rows="2" required>{{ q.explanation }}</textarea>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label small fw-bold">Teacher Notes / Reason for Modification</label>
-                                <input type="text" name="teacher_notes" class="form-control form-control-sm" placeholder="e.g. Improved clarity of distractor D" value="{{ q.teacher_notes or '' }}">
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-primary btn-sm">Save &amp; Approve as Ground Truth</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <!-- Reject Modal -->
-        <div class="modal fade" id="rejectModal{{ q.id }}" tabindex="-1" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <form action="{{ url_for('teacher.reject_question', record_id=q.id) }}" method="POST">
-                        <div class="modal-header">
-                            <h5 class="modal-title">Reject Question #{{ q.id }}</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                        </div>
-                        <div class="modal-body">
-                            <p class="small text-muted">Rejecting this question excludes it from the student practice pool and future fine-tuning dataset export.</p>
-                            <label class="form-label small fw-bold">Reason for Rejection</label>
-                            <textarea name="reason" class="form-control" rows="2" placeholder="e.g. Factually ambiguous or hallucinated fact" required></textarea>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-danger btn-sm">Confirm Rejection</button>
-                        </div>
-                    </form>
-                </div>
+                {% endif %}
             </div>
         </div>
         {% endfor %}
@@ -373,7 +216,7 @@
     <div class="card shadow-sm text-center py-5">
         <div class="card-body">
             <h5 class="text-muted">No Generated Questions Found</h5>
-            <p class="text-muted small">No questions match the current status filter (<code>{{ status_filter }}</code>). Upload course materials and trigger generation above!</p>
+            <p class="text-muted small">Upload course materials and specify the number of questions to generate above!</p>
         </div>
     </div>
 {% endif %}

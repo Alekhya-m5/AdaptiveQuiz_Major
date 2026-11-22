@@ -59,6 +59,8 @@ def _run_schema_migrations():
         if db.engine.dialect.name == "postgresql":
             with db.engine.connect() as conn:
                 conn.execute(db.text("""
+                    ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS assigned_usn VARCHAR(50) REFERENCES students(usn);
+                    ALTER TABLE generated_question_records ADD COLUMN IF NOT EXISTS assigned_usn VARCHAR(50) REFERENCES students(usn);
                     ALTER TABLE generated_question_records
                         ALTER COLUMN source_page_or_slide TYPE VARCHAR(500),
                         ALTER COLUMN source_filename TYPE VARCHAR(500),

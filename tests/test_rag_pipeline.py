@@ -21,6 +21,7 @@ from app.models import (
     GeneratedQuestionRecord,
     Quiz,
     Question,
+    Attempt,
     StudentTheta,
     StudentMastery,
 )
@@ -380,7 +381,7 @@ class TestRAGPipeline(unittest.TestCase):
         self.assertEqual(record.concept_tag, "Sampling")
         self.assertAlmostEqual(record.learner_theta, 1.25, places=2)
         self.assertAlmostEqual(record.learner_mastery, 0.35, places=2)
-        self.assertEqual(record.validation_status, "pending_review")
+        self.assertEqual(record.validation_status, "approved")
 
     # -----------------------------------------------------------------------
     # 7. Teacher Review Workflow Tests
@@ -490,6 +491,95 @@ class TestRAGPipeline(unittest.TestCase):
         db.session.refresh(bad_record)
         self.assertEqual(bad_record.validation_status, "rejected")
         self.assertEqual(bad_record.teacher_notes, "Contains inaccurate fact")
+
+    def test_teacher_generate_multiple_questions(self):
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = self.teacher.teacher_id
+            sess["role"] = "teacher"
+
+        initial_count = GeneratedQuestionRecord.query.count()
+        resp = self.client.post(
+            "/teacher/generated-questions/generate",
+            data={
+                "course": "RM",
+                "concept_tag": "Sampling, Research Design",
+                "num_questions": "3",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+        new_count = GeneratedQuestionRecord.query.count()
+        self.assertEqual(new_count, initial_count + 3)
+        # All generated records should be approved automatically and assigned to student
+        latest_records = GeneratedQuestionRecord.query.order_by(GeneratedQuestionRecord.id.desc()).limit(3).all()
+        for r in latest_records:
+            self.assertEqual(r.validation_status, "approved")
+            self.assertEqual(r.assigned_usn, self.student.usn)
+
+        # Check assigned quiz created for student
+        assigned_quiz = Quiz.query.filter_by(assigned_usn=self.student.usn).first()
+        self.assertIsNotNone(assigned_quiz)
+        self.assertEqual(len(assigned_quiz.questions), 3)
+
+    def test_assigned_quiz_student_isolation_and_submission(self):
+        # 1. Create student 2 in course RM
+        s2 = Student(usn="1RV21CS002", first_name="Bob", last_name="Smith", course="RM")
+        s2.set_password("pass123")
+        db.session.add(s2)
+        db.session.commit()
+
+        # 2. Teacher generates questions for all enrolled students (Ada & Bob)
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = self.teacher.teacher_id
+            sess["role"] = "teacher"
+
+        resp = self.client.post(
+            "/teacher/generated-questions/generate",
+            data={
+                "course": "RM",
+                "concept_tag": "Sampling",
+                "num_questions": "2",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        quiz_ada = Quiz.query.filter_by(assigned_usn="1RV21CS001").first()
+        quiz_bob = Quiz.query.filter_by(assigned_usn="1RV21CS002").first()
+        self.assertIsNotNone(quiz_ada)
+        self.assertIsNotNone(quiz_bob)
+        self.assertNotEqual(quiz_ada.id, quiz_bob.id)
+
+        # 3. Ada logs in: sees only her assigned quiz, NOT Bob's
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = "1RV21CS001"
+            sess["role"] = "student"
+
+        dash_resp = self.client.get("/student/dashboard")
+        self.assertEqual(dash_resp.status_code, 200)
+        self.assertIn(f"href=\"/student/quiz/{quiz_ada.id}/take\"", dash_resp.get_data(as_text=True))
+        self.assertNotIn(f"href=\"/student/quiz/{quiz_bob.id}/take\"", dash_resp.get_data(as_text=True))
+
+        # 4. Ada tries to access Bob's quiz directly -> 403 Forbidden
+        forbidden_resp = self.client.get(f"/student/quiz/{quiz_bob.id}/take")
+        self.assertEqual(forbidden_resp.status_code, 403)
+
+        # 5. Ada takes and submits her assigned quiz -> updates IRT and BKT
+        post_data = {}
+        for q in quiz_ada.questions:
+            post_data[f"question_{q.id}"] = q.correct_option
+
+        submit_resp = self.client.post(
+            f"/student/quiz/{quiz_ada.id}/take",
+            data=post_data,
+            follow_redirects=True,
+        )
+        self.assertEqual(submit_resp.status_code, 200)
+
+        # Verify attempt registered
+        attempt = Attempt.query.filter_by(quiz_id=quiz_ada.id, usn="1RV21CS001").first()
+        self.assertIsNotNone(attempt)
+        self.assertEqual(attempt.correct_count, len(quiz_ada.questions))
 
     # -----------------------------------------------------------------------
     # 8. LoRA Fine-Tuning Dataset Export Tests (No PII, Approved Only)

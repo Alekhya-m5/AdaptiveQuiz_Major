@@ -140,7 +140,7 @@ class QwenLoRAModelService:
             base_model = AutoModelForCausalLM.from_pretrained(
                 self.base_model_name,
                 device_map=self.device,
-                torch_dtype=torch.float32,  # CPU / Mac stable precision
+                dtype=torch.float32,  # CPU / Mac stable precision
                 trust_remote_code=True,
                 low_cpu_mem_usage=True,
             )
