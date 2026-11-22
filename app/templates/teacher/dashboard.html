@@ -38,7 +38,10 @@
             <h5 class="mb-0 fw-bold">Curriculum Assessment Quizzes</h5>
             <small class="text-muted">Imported unit assessments calibrated for IRT ability and BKT concept mastery.</small>
         </div>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap">
+            <a href="{{ url_for('teacher.sync_assessments') }}" class="btn btn-outline-secondary btn-sm" title="Scan data/assessments and sync any missing quiz datasets">
+                🔄 Sync Datasets
+            </a>
             <a href="{{ url_for('teacher.export_learner_profiles_csv') }}" class="btn btn-outline-success btn-sm">
                 📥 Export Learner Profiles (CSV)
             </a>

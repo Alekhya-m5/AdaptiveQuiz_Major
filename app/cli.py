@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from app import create_app
+from app.ingestion.csv_reader import compute_file_hash
 from app.ingestion.service import IngestionService
 from app.pipeline import AdaptivePipeline
 from app.models import ImportBatch, ItemCalibration, StudentTheta, StudentMastery, ImportedResponse
@@ -76,6 +77,49 @@ def import_all_assessments(data_dir: Path = None):
         "ingestion_results": results,
         "models": model_res,
     }
+
+
+def auto_sync_bundled_assessments(data_dir: Path = None) -> dict:
+    """
+    Checks data/assessments/ for any assessment CSV not yet imported into ImportBatch.
+    If pending files exist, automatically ingests them and recalculates IRT/BKT models.
+    Lightweight and fast (~15ms when already up to date).
+    """
+    try:
+        if data_dir is None:
+            data_dir = Path(__file__).resolve().parent.parent / "data" / "assessments"
+
+        if not data_dir.exists():
+            return {"status": "NO_DIR", "pending_count": 0}
+
+        csv_files = sorted(list(data_dir.glob("*.csv")))
+        pending_files = []
+        for f in csv_files:
+            f_hash = compute_file_hash(f)
+            if not ImportBatch.query.filter_by(file_hash=f_hash, status="COMPLETED").first():
+                pending_files.append(f)
+
+        if not pending_files:
+            return {"status": "ALREADY_SYNCED", "pending_count": 0}
+
+        print(f"[Auto-Sync] Found {len(pending_files)} unimported assessment dataset(s). Auto-importing...")
+        for f in pending_files:
+            print(f"[Auto-Sync] Importing {f.name}...")
+            IngestionService.import_csv(str(f))
+
+        print("[Auto-Sync] Recalculating IRT and BKT models...")
+        model_res = AdaptivePipeline.recalculate_models_only()
+        print(f"[Auto-Sync] Complete. Calibrated items: {model_res['irt']['items_calibrated']}, BKT pairs: {model_res['bkt']['student_concepts_updated']}")
+
+        return {
+            "status": "SYNCED",
+            "pending_count": len(pending_files),
+            "imported_files": [f.name for f in pending_files],
+            "models": model_res,
+        }
+    except Exception as e:
+        print(f"[Auto-Sync] Notice: could not auto-sync assessments: {e}")
+        return {"status": "ERROR", "error": str(e)}
 
 
 def register_cli_commands(app):

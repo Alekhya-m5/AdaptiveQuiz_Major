@@ -46,6 +46,9 @@ def create_app(test_config=None):
         with app.app_context():
             db.create_all()
             _run_schema_migrations()
+            if not app.config.get("TESTING"):
+                from .cli import auto_sync_bundled_assessments
+                auto_sync_bundled_assessments()
 
     return app
 

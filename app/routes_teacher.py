@@ -161,6 +161,16 @@ def dashboard():
     )
 
 
+@teacher_bp.route("/sync-assessments", methods=["GET", "POST"])
+@teacher_required
+def sync_assessments():
+    """Sync all bundled assessment CSVs from data/assessments/ and recalculate models."""
+    from app.cli import import_all_assessments
+    import_all_assessments()
+    flash("Assessment datasets synchronized successfully: all bundled unit quizzes and IRT/BKT models are up to date.", "success")
+    return redirect(url_for("teacher.dashboard"))
+
+
 @teacher_bp.route("/quiz/create", methods=["GET", "POST"])
 @teacher_required
 def create_quiz():
