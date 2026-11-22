@@ -52,7 +52,7 @@ AdaptiveQuiz/
 │   └── templates/           # Jinja2 HTML templates
 ├── data/
 │   └── assessments/         # Official assessment CSVs (Unit-1, Unit-2)
-├── tests/                   # Automated unit & integration test suite (58+ tests)
+├── tests/                   # Automated unit & integration test suite (61 tests)
 ├── .env.example             # Template for environment variables
 ├── requirements.txt         # Project dependencies
 ├── run.py                   # Application entry point
@@ -68,14 +68,11 @@ Follow these steps to set up and run the project from scratch on any computer.
 ### 1. Clone the Repository & Checkout Branch
 
 ```bash
-git clone https://github.com/BhagyashreeSM5/AdaptiveQuiz.git
-cd AdaptiveQuiz
-
-# Checkout the active feature branch with IRT, BKT, Unit 1 & Unit 2 support:
-git checkout feature/student-analytics-irt-bkt
+git clone https://github.com/Alekhya-m5/AdaptiveQuiz_Major.git
+cd AdaptiveQuiz_Major
 ```
 
-*(Note: If the branch has already been merged into `main`, you can stay on `main` and run `git pull origin main`.)*
+*(The `main` branch contains all features, assessment datasets, IRT, BKT, and RAG-LoRA pipelines.)*
 
 ---
 
@@ -192,7 +189,7 @@ Run the full automated test suite to verify pipeline integrity:
 python -m unittest discover tests
 ```
 
-All 58+ unit and integration tests should pass.
+All 61 unit and integration tests should pass.
 
 ---
 
