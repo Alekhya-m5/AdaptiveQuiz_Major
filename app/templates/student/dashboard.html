@@ -6,9 +6,14 @@
         <h3 class="mb-1">Welcome, {{ student.full_name }} ({{ student.usn }})</h3>
         <p class="text-muted mb-0">Course: <span class="badge bg-secondary">{{ student.course }}</span></p>
     </div>
-    <a href="{{ url_for('student.results') }}" class="btn btn-outline-primary">
-        📊 View Assessment Results (IRT &amp; BKT)
-    </a>
+    <div class="d-flex gap-2">
+        <a href="{{ url_for('student.adaptive_quiz') }}" class="btn btn-info text-white">
+            ⚡ Practice Questions (Adaptive AI)
+        </a>
+        <a href="{{ url_for('student.results') }}" class="btn btn-outline-primary">
+            📊 View Assessment Results (IRT &amp; BKT)
+        </a>
+    </div>
 </div>
 
 <h5 class="mt-4">Available Quizzes</h5>

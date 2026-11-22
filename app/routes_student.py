@@ -153,6 +153,12 @@ def take_quiz(quiz_id):
     return render_template("student/take_quiz.html", quiz=quiz, student=student)
 
 
+@student_bp.route("/analytics")
+@student_required
+def analytics():
+    return redirect(url_for("student.results"))
+
+
 @student_bp.route("/results")
 @student_required
 def results():

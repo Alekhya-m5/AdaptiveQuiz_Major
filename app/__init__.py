@@ -45,5 +45,32 @@ def create_app(test_config=None):
     if not app.config.get("TESTING") or app.config.get("SQLALCHEMY_DATABASE_URI"):
         with app.app_context():
             db.create_all()
+            _run_schema_migrations()
 
     return app
+
+
+def _run_schema_migrations():
+    """Ensure database column sizes in PostgreSQL match updated model specifications."""
+    try:
+        if db.engine.dialect.name == "postgresql":
+            with db.engine.connect() as conn:
+                conn.execute(db.text("""
+                    ALTER TABLE generated_question_records
+                        ALTER COLUMN source_page_or_slide TYPE VARCHAR(500),
+                        ALTER COLUMN source_filename TYPE VARCHAR(500),
+                        ALTER COLUMN option_a TYPE TEXT,
+                        ALTER COLUMN option_b TYPE TEXT,
+                        ALTER COLUMN option_c TYPE TEXT,
+                        ALTER COLUMN option_d TYPE TEXT,
+                        ALTER COLUMN topic TYPE VARCHAR(255),
+                        ALTER COLUMN concept_tag TYPE VARCHAR(255),
+                        ALTER COLUMN target_difficulty TYPE VARCHAR(50),
+                        ALTER COLUMN target_bloom TYPE VARCHAR(100),
+                        ALTER COLUMN validation_status TYPE VARCHAR(50),
+                        ALTER COLUMN reviewed_by TYPE VARCHAR(100);
+                """))
+                conn.commit()
+    except Exception:
+        # Ignore if tables do not exist yet or columns already altered
+        pass

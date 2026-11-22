@@ -412,34 +412,34 @@ class GeneratedQuestionRecord(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     course = db.Column(db.String(50), nullable=False, default="RM", index=True)
-    topic = db.Column(db.String(120), nullable=True)
-    concept_tag = db.Column(db.String(120), nullable=False, index=True)
+    topic = db.Column(db.String(255), nullable=True)
+    concept_tag = db.Column(db.String(255), nullable=False, index=True)
     learner_theta = db.Column(db.Float, nullable=True)
     learner_mastery = db.Column(db.Float, nullable=True)
-    target_difficulty = db.Column(db.String(20), nullable=False, default="Medium")
-    target_bloom = db.Column(db.String(50), nullable=True)
+    target_difficulty = db.Column(db.String(50), nullable=False, default="Medium")
+    target_bloom = db.Column(db.String(100), nullable=True)
 
     source_context = db.Column(db.Text, nullable=True)
     prompt_text = db.Column(db.Text, nullable=True)
     retrieved_chunk_ids = db.Column(db.Text, nullable=True)  # JSON list of chunk IDs
 
     question_text = db.Column(db.Text, nullable=False)
-    option_a = db.Column(db.String(500), nullable=False)
-    option_b = db.Column(db.String(500), nullable=False)
-    option_c = db.Column(db.String(500), nullable=False)
-    option_d = db.Column(db.String(500), nullable=False)
+    option_a = db.Column(db.Text, nullable=False)
+    option_b = db.Column(db.Text, nullable=False)
+    option_c = db.Column(db.Text, nullable=False)
+    option_d = db.Column(db.Text, nullable=False)
     correct_option = db.Column(db.String(1), nullable=False)  # 'A', 'B', 'C', 'D'
     explanation = db.Column(db.Text, nullable=False)
 
     source_document_id = db.Column(db.Integer, db.ForeignKey("course_documents.id"), nullable=True)
-    source_filename = db.Column(db.String(255), nullable=True)
-    source_page_or_slide = db.Column(db.String(50), nullable=True)
+    source_filename = db.Column(db.String(500), nullable=True)
+    source_page_or_slide = db.Column(db.String(500), nullable=True)
 
     model_name = db.Column(db.String(100), default="Qwen/Qwen3-0.6B")
     adapter_version = db.Column(db.String(100), default="pilot_lora_v1")
 
     # Workflow statuses: 'generated', 'validation_failed', 'pending_review', 'approved', 'rejected'
-    validation_status = db.Column(db.String(30), default="pending_review", nullable=False, index=True)
+    validation_status = db.Column(db.String(50), default="pending_review", nullable=False, index=True)
     validation_notes = db.Column(db.Text, nullable=True)
     teacher_edited = db.Column(db.Boolean, default=False, nullable=False)
     teacher_notes = db.Column(db.Text, nullable=True)
@@ -447,4 +447,4 @@ class GeneratedQuestionRecord(db.Model):
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     reviewed_at = db.Column(db.DateTime, nullable=True)
-    reviewed_by = db.Column(db.String(30), nullable=True)
+    reviewed_by = db.Column(db.String(100), nullable=True)

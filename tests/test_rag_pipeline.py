@@ -583,6 +583,42 @@ class TestRAGPipeline(unittest.TestCase):
         self.assertEqual(data["input"]["difficulty"], "Medium")
         self.assertEqual(data["input"]["bloom_level"], "Apply")
 
+    def test_student_adaptive_quiz_setup_renders_without_build_error(self):
+        """Verify student adaptive practice page renders cleanly without BuildError."""
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = self.student.usn
+            sess["role"] = "student"
+            sess["usn"] = self.student.usn
+
+        response = self.client.get("/student/adaptive-quiz")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Personalized Adaptive Practice", response.data)
+
+        # Verify analytics alias redirects
+        res_analytics = self.client.get("/student/analytics")
+        self.assertEqual(res_analytics.status_code, 302)
+
+    def test_long_source_ref_and_option_storage_no_truncation(self):
+        """Verify long filenames and page refs (>50 chars) can be stored without StringDataRightTruncation."""
+        long_ref = "A" * 60 + " (Page 99)"
+        rec = GeneratedQuestionRecord(
+            course="RM",
+            concept_tag="Research Designs",
+            target_difficulty="Medium",
+            question_text="Test long ref question?",
+            option_a="A",
+            option_b="B",
+            option_c="C",
+            option_d="D",
+            correct_option="A",
+            explanation="Explanation",
+            source_page_or_slide=long_ref,
+            source_filename="B" * 200 + ".pdf",
+        )
+        db.session.add(rec)
+        db.session.commit()
+        self.assertEqual(rec.source_page_or_slide, long_ref)
+
 
 if __name__ == "__main__":
     unittest.main()
