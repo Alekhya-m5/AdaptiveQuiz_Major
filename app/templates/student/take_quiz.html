@@ -5,7 +5,7 @@
 <p class="text-muted">
     {{ quiz.questions|length }} questions &middot; {{ quiz.total_marks }} marks total
     {% if quiz.published_at or quiz.created_at %}
-        &middot; 📅 Published: {{ (quiz.published_at or quiz.created_at).strftime('%d %b %Y at %I:%M %p') }}
+        &middot; 📅 Published: {{ (quiz.published_at or quiz.created_at).strftime('%d %b %Y') }}
     {% endif %}
     &middot; Answer every question, then submit. You can only attempt this quiz once.
 </p>

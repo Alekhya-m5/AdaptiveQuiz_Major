@@ -581,6 +581,40 @@ class TestRAGPipeline(unittest.TestCase):
         self.assertIsNotNone(attempt)
         self.assertEqual(attempt.correct_count, len(quiz_ada.questions))
 
+    def test_teacher_generate_selected_students_only(self):
+        # 1. Create student 2 in course RM
+        s2 = Student(usn="1RV21CS002", first_name="Bob", last_name="Smith", course="RM")
+        s2.set_password("pass123")
+        db.session.add(s2)
+        db.session.commit()
+
+        # 2. Teacher generates questions ONLY for Bob (1RV21CS002)
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = self.teacher.teacher_id
+            sess["role"] = "teacher"
+
+        resp = self.client.post(
+            "/teacher/generated-questions/generate",
+            data={
+                "course": "RM",
+                "concept_tag": "Sampling",
+                "num_questions": "2",
+                "student_selection_mode": "selected",
+                "selected_usns": ["1RV21CS002"],
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        # Bob should have an assigned quiz
+        quiz_bob = Quiz.query.filter_by(assigned_usn="1RV21CS002").first()
+        self.assertIsNotNone(quiz_bob)
+        self.assertEqual(len(quiz_bob.questions), 2)
+
+        # Ada (1RV21CS001) should NOT have any quiz assigned from this run
+        quiz_ada = Quiz.query.filter_by(assigned_usn="1RV21CS001").first()
+        self.assertIsNone(quiz_ada)
+
     # -----------------------------------------------------------------------
     # 8. LoRA Fine-Tuning Dataset Export Tests (No PII, Approved Only)
     # -----------------------------------------------------------------------

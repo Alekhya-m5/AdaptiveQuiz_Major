@@ -28,8 +28,18 @@ MAX_RETRIES = 2
 def build_system_prompt() -> str:
     return (
         "You are an expert curriculum assessment question author. Based strictly on the provided course material, "
-        "generate exactly ONE educational multiple-choice question (MCQ) matching the target difficulty and concept.\n"
-        "Rules:\n"
+        "generate exactly ONE educational multiple-choice question (MCQ) calibrated to the target difficulty, "
+        "Bloom taxonomy level, and individual learner ability metrics.\n"
+        "Pedagogical Calibration Rules:\n"
+        "- Easy (Remember): Focus on direct definitions, core terminology, and explicit facts stated in the text. "
+        "Question stems should be direct and clear.\n"
+        "- Medium (Understand / Apply): Focus on conceptual explanation, procedural relationships, and practical scenarios. "
+        "Require students to interpret why a principle exists or how it applies.\n"
+        "- Hard (Analyze / Evaluate): Focus on critical distinctions, multi-step scenarios, evaluating edge cases, "
+        "boundary conditions, or limitations substantiated in the text. Stems must demand high cognitive discrimination.\n"
+        "- Scaffolding by Ability: For lower ability/mastery learners, use clear language and distinct distractors that address common misconceptions. "
+        "For high ability/mastery learners, formulate rigorous questions with sophisticated near-miss distractors.\n"
+        "Formatting Rules:\n"
         "1. Every question must be fully factually grounded in the provided source material.\n"
         "2. Return ONLY valid JSON with no markdown prose or thinking tags outside the JSON.\n"
         "3. Include exactly 4 options with keys option_a, option_b, option_c, option_d.\n"
@@ -38,10 +48,10 @@ def build_system_prompt() -> str:
         "Required JSON schema:\n"
         "{\n"
         '  "question": "What is ...?",\n'
-        '  "option_a": "First distractor",\n'
-        '  "option_b": "Correct answer text",\n'
-        '  "option_c": "Second distractor",\n'
-        '  "option_d": "Third distractor",\n'
+        '  "option_a": "First option",\n'
+        '  "option_b": "Second option",\n'
+        '  "option_c": "Third option",\n'
+        '  "option_d": "Fourth option",\n'
         '  "correct_option": "B",\n'
         '  "explanation": "Why B is correct based on the text.",\n'
         '  "difficulty": "Medium",\n'
@@ -65,6 +75,30 @@ def build_user_prompt(
         for c in retrieved_chunks
     )
 
+    pedagogical_directives = {
+        "Hard": (
+            f"COGNITIVE DIRECTIVE (HIGH COGNITIVE DEMAND - {target_bloom.upper()}):\n"
+            f"The learner has high latent ability (IRT θ={theta:.2f}) and concept mastery (BKT P(L)={mastery:.2f}).\n"
+            "Formulate an analytical question focusing on subtle legal/technical distinctions, boundary conditions, "
+            "exceptions, or evaluating comparative scenarios directly grounded in the text. "
+            "Do NOT ask a simple definition recall question. Ensure distractors represent plausible, sophisticated near-misses."
+        ),
+        "Medium": (
+            f"COGNITIVE DIRECTIVE (INTERMEDIATE COGNITIVE DEMAND - {target_bloom.upper()}):\n"
+            f"The learner has intermediate ability (IRT θ={theta:.2f}) and concept mastery (BKT P(L)={mastery:.2f}).\n"
+            "Formulate a question testing conceptual comprehension or practical application of the principles. "
+            "Ask how the rule applies in practice or the underlying reasoning explained in the context. "
+            "Distractors should test whether the student genuinely understands the mechanics rather than memorized keywords."
+        ),
+        "Easy": (
+            f"COGNITIVE DIRECTIVE (FOUNDATIONAL COGNITIVE DEMAND - {target_bloom.upper()}):\n"
+            f"The learner has foundational ability (IRT θ={theta:.2f}) and developing mastery (BKT P(L)={mastery:.2f}).\n"
+            "Formulate a clear definition or core principle recognition question directly based on the key facts in the text. "
+            "Ensure the question is straightforward and accessible, with clear distractors that clarify fundamental concepts."
+        ),
+    }
+    directive = pedagogical_directives.get(target_difficulty, pedagogical_directives["Medium"])
+
     prompt = (
         f"<|im_start|>system\n{build_system_prompt()}<|im_end|>\n"
         f"<|im_start|>user\n"
@@ -74,6 +108,7 @@ def build_user_prompt(
         f"Target Bloom Level: {target_bloom}\n"
         f"Learner Ability (IRT Theta): {theta:.2f}\n"
         f"Concept Mastery (BKT P(L)): {mastery:.2f}\n\n"
+        f"{directive}\n\n"
         f"Source Material Context:\n{context_text}\n"
     )
 
@@ -90,36 +125,114 @@ def fallback_grounded_generator(
     target_difficulty: str,
     target_bloom: str,
     retrieved_chunks: List[Dict[str, Any]],
+    theta: float = 0.0,
+    mastery: float = 0.20,
+    seed_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Deterministic educational heuristic generator.
-    Activated when local GPU/CPU model service is unavailable or in lightweight test environments.
-    Extracts key statements directly from retrieved chunks to ensure 100% grounding.
+    Pedagogically differentiated fallback generator.
+    Activated when local GPU/CPU model service is unavailable or in lightweight environments.
+    Extracts statements from retrieved chunks, personalizing question stem, options, cognitive demand,
+    and Bloom's taxonomy tier based on target difficulty and learner metrics.
     """
+    all_sentences = []
     if retrieved_chunks:
-        primary_chunk = retrieved_chunks[0]["content"]
-    else:
-        primary_chunk = f"{concept_tag} is a fundamental concept in {course}."
+        for chunk in retrieved_chunks:
+            chunk_content = chunk.get("content", "")
+            raw_sents = [
+                s.strip()
+                for s in re.split(r"(?<=[.!?\n])\s+", chunk_content)
+                if len(s.strip()) > 20 and not s.strip().isdigit()
+            ]
+            all_sentences.extend(raw_sents)
 
-    # Extract declarative sentences
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", primary_chunk) if len(s.strip()) > 25]
-    focus_sentence = sentences[0] if sentences else f"{concept_tag} is defined in the syllabus."
+    if not all_sentences:
+        all_sentences = [
+            f"{concept_tag} is a core subject area in {course}.",
+            f"The application of {concept_tag} requires systematic evaluation and adherence to established principles.",
+            f"Under {concept_tag}, exceptions and boundary constraints govern operational validity.",
+        ]
 
-    # Formulate question
-    question = f"In the study of '{concept_tag}', which of the following statements is correctly substantiated by the course material?"
-    option_a = focus_sentence
-    option_b = f"It states that {concept_tag.lower()} is irrelevant to the overall methodology."
-    option_c = f"It assumes that {concept_tag.lower()} operates without empirical observation."
-    option_d = f"It completely replaces all standard evaluation protocols."
+    seed_str = f"{seed_key}_{concept_tag}_{target_difficulty}_{theta:.2f}_{mastery:.2f}"
+    hash_val = abs(hash(seed_str))
+    focus_sentence = all_sentences[hash_val % len(all_sentences)]
+    focus_sentence = re.sub(r"^\d+\s*", "", focus_sentence).strip()
+
+    if target_difficulty == "Hard":
+        stem_variants = [
+            f"In critically analyzing edge cases and limitations under '{concept_tag}', which legal or methodological distinction is decisive?",
+            f"When evaluating boundary conditions and exceptions concerning '{concept_tag}', which principle governs proper determination?",
+            f"In a complex scenario involving competing claims under '{concept_tag}', which analytical criterion must be satisfied according to course material?",
+        ]
+        question = stem_variants[hash_val % len(stem_variants)]
+        correct_text = f"Compliance with the statutory constraint that: {focus_sentence}"
+        distractors = [
+            f"Unilateral action is permitted under '{concept_tag}' without regulatory consensus or dispute review.",
+            f"Exceptions under '{concept_tag}' automatically expire once general commercial utility is demonstrated.",
+            f"Statutory restrictions on '{concept_tag}' do not apply if opposing parties agree to waive standard verification protocols.",
+        ]
+        explanation = (
+            f"At the Analyze level (θ={theta:.2f}), critical evaluation is required: "
+            f"the course material explicitly establishes that '{focus_sentence}', which acts as a decisive constraint."
+        )
+
+    elif target_difficulty == "Medium":
+        stem_variants = [
+            f"How does the principle of '{concept_tag}' apply when resolving practical situations or operational requirements?",
+            f"Which scenario best illustrates the practical application of '{concept_tag}' as outlined in the curriculum?",
+            f"In understanding the operational mechanisms of '{concept_tag}', why is this specific requirement enforced?",
+        ]
+        question = stem_variants[hash_val % len(stem_variants)]
+        correct_text = f"It enforces the principle that: {focus_sentence}"
+        distractors = [
+            f"It permits parties to bypass '{concept_tag}' provisions if informal verbal agreements exist.",
+            f"It restricts '{concept_tag}' evaluations strictly to post-implementation review rather than prior compliance.",
+            f"It mandates that '{concept_tag}' guidelines be applied only when external dispute litigation occurs.",
+        ]
+        explanation = (
+            f"At the Understand/Apply level (θ={theta:.2f}), conceptual comprehension applies: "
+            f"the material substantiates that '{focus_sentence}'."
+        )
+
+    else:  # Easy
+        stem_variants = [
+            f"According to the course materials on '{concept_tag}', which of the following is the primary definition or rule established?",
+            f"Under the foundational syllabus for '{concept_tag}', which core statement is explicitly substantiated?",
+            f"In the introductory study of '{concept_tag}', which of the following accurately identifies its key principle?",
+        ]
+        question = stem_variants[hash_val % len(stem_variants)]
+        correct_text = focus_sentence
+        distractors = [
+            f"It states that '{concept_tag.lower()}' is optional and carries no formal regulatory standing.",
+            f"It completely supersedes all established institutional and syllabus guidelines without qualification.",
+            f"It assumes that '{concept_tag.lower()}' operates without any need for factual verification or documentation.",
+        ]
+        explanation = (
+            f"At the Remember level (θ={theta:.2f}), foundational recall confirms: "
+            f"'{focus_sentence}' is explicitly stated in the source context."
+        )
+
+    correct_idx = (hash_val + int(theta * 7) + int(mastery * 13)) % 4
+    option_letters = ["A", "B", "C", "D"]
+    correct_option = option_letters[correct_idx]
+
+    options = {}
+    d_idx = 0
+    for idx, letter in enumerate(option_letters):
+        if idx == correct_idx:
+            options[f"option_{letter.lower()}"] = correct_text
+        else:
+            options[f"option_{letter.lower()}"] = distractors[d_idx % len(distractors)]
+            d_idx += 1
 
     return {
         "question": question,
-        "option_a": option_a,
-        "option_b": option_b,
-        "option_c": option_c,
-        "option_d": option_d,
-        "correct_option": "A",
-        "explanation": f"Based on the course material: '{focus_sentence}'",
+        "option_a": options["option_a"],
+        "option_b": options["option_b"],
+        "option_c": options["option_c"],
+        "option_d": options["option_d"],
+        "correct_option": correct_option,
+        "explanation": explanation,
         "difficulty": target_difficulty,
         "bloom_level": target_bloom,
     }
@@ -135,6 +248,7 @@ def generate_adaptive_question(
     top_k_chunks: int = 3,
     max_retries: int = MAX_RETRIES,
     assigned_usn: Optional[str] = None,
+    question_index: int = 0,
 ) -> Dict[str, Any]:
     """
     Execute full end-to-end adaptive generation pipeline:
@@ -218,11 +332,29 @@ def generate_adaptive_question(
             else:
                 # Model weights unavailable -> invoke grounded fallback
                 logger.info(f"Model service not available ({model_service._load_error}); using grounded fallback.")
-                parsed = fallback_grounded_generator(course, concept_tag, difficulty, bloom, chunks)
+                parsed = fallback_grounded_generator(
+                    course=course,
+                    concept_tag=concept_tag,
+                    target_difficulty=difficulty,
+                    target_bloom=bloom,
+                    retrieved_chunks=chunks,
+                    theta=theta_used,
+                    mastery=mastery_used,
+                    seed_key=f"{assigned_usn or usn or 'std'}_{question_index}_{attempt}",
+                )
                 model_name_used = "grounded_template_fallback"
         except Exception as e:
             logger.warning(f"Generation attempt {attempt + 1} encountered exception: {e}")
-            parsed = fallback_grounded_generator(course, concept_tag, difficulty, bloom, chunks)
+            parsed = fallback_grounded_generator(
+                course=course,
+                concept_tag=concept_tag,
+                target_difficulty=difficulty,
+                target_bloom=bloom,
+                retrieved_chunks=chunks,
+                theta=theta_used,
+                mastery=mastery_used,
+                seed_key=f"{assigned_usn or usn or 'std'}_{question_index}_{attempt}",
+            )
             model_name_used = "grounded_template_fallback"
 
         is_valid, errors, validated_data = validate_mcq_data(parsed, source_context=combined_source_text)
@@ -238,7 +370,16 @@ def generate_adaptive_question(
 
     if not generated_mcq_data:
         # Ultimate fallback to ensure a valid question is delivered
-        generated_mcq_data = fallback_grounded_generator(course, concept_tag, difficulty, bloom, chunks)
+        generated_mcq_data = fallback_grounded_generator(
+            course=course,
+            concept_tag=concept_tag,
+            target_difficulty=difficulty,
+            target_bloom=bloom,
+            retrieved_chunks=chunks,
+            theta=theta_used,
+            mastery=mastery_used,
+            seed_key=f"{assigned_usn or usn or 'std'}_{question_index}_final",
+        )
         validation_status = "approved"
         validation_notes = f"Model retries exhausted. Fallback used. Errors: {'; '.join(last_errors)}"
         model_name_used = "grounded_template_fallback"

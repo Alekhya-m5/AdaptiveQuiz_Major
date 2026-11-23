@@ -48,11 +48,11 @@
     <div class="col-lg-8">
         <div class="card shadow-sm h-100 border-primary">
             <div class="card-header bg-primary text-white py-2 d-flex justify-content-between align-items-center">
-                <span class="fw-bold small">⚡ On-Demand Adaptive MCQ Generator (All Enrolled Students)</span>
+                <span class="fw-bold small">⚡ On-Demand Adaptive MCQ Generator</span>
                 <span class="badge bg-light text-primary small">Auto IRT &amp; BKT Calibration</span>
             </div>
             <div class="card-body py-2">
-                <form action="{{ url_for('teacher.trigger_generation') }}" method="POST">
+                <form action="{{ url_for('teacher.trigger_generation') }}" method="POST" id="generateQuizForm">
                     <div class="row g-2 align-items-end">
                         <div class="col-md-2">
                             <label class="form-label small fw-bold mb-1">Course</label>
@@ -62,7 +62,7 @@
                                 {% endfor %}
                             </select>
                         </div>
-                        <div class="col-md-5">
+                        <div class="col-md-4">
                             <label class="form-label small fw-bold mb-1">Topic(s) <span class="text-muted fw-normal">(comma-separated)</span></label>
                             <input type="text" name="concept_tag" class="form-control form-control-sm"
                                 list="conceptList" placeholder="e.g. Types of IPR, Patents" required>
@@ -77,10 +77,43 @@
                             <input type="number" name="num_questions" class="form-control form-control-sm" min="1"
                                 max="20" value="3" placeholder="3" required>
                         </div>
-                        <div class="col-md-3">
-                            <button type="submit" class="btn btn-primary btn-sm w-100">
-                                🚀 Generate for All Students
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold mb-1">Students</label>
+                            <select name="student_selection_mode" id="targetModeSelect" class="form-select form-select-sm" onchange="toggleStudentSelection(this.value)">
+                                <option value="all" selected>All Students</option>
+                                <option value="selected">Select Students...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" id="generateSubmitBtn" class="btn btn-primary btn-sm w-100 text-nowrap">
+                                🚀 Generate All
                             </button>
+                        </div>
+                    </div>
+
+                    <!-- Collapsible Container for Selecting Specific Students -->
+                    <div id="studentSelectionContainer" class="mt-3 p-2 border rounded bg-light" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                            <span class="small fw-bold text-dark">
+                                👥 Choose Students to Assign (<span id="selectedCountBadge" class="text-primary fw-bold">0 selected</span>):
+                            </span>
+                            <div class="d-flex gap-2 align-items-center">
+                                <input type="text" id="studentFilterInput" class="form-control form-control-sm" style="max-width: 200px; font-size: 0.8rem;" placeholder="Filter USN or Name...">
+                                <button type="button" class="btn btn-xs btn-outline-primary py-0 px-2" style="font-size: 0.78rem;" onclick="setAllCheckboxes(true)">Select All</button>
+                                <button type="button" class="btn btn-xs btn-outline-secondary py-0 px-2" style="font-size: 0.78rem;" onclick="setAllCheckboxes(false)">Clear</button>
+                            </div>
+                        </div>
+                        <div id="studentCheckboxList" class="row g-2 bg-white p-2 border rounded" style="max-height: 160px; overflow-y: auto;">
+                            {% for s in (all_course_students or student_rows) %}
+                            <div class="col-md-6 student-item" data-text="{{ s.usn|lower }} {{ (s.name or s.full_name or '')|lower }}">
+                                <div class="form-check">
+                                    <input class="form-check-input student-usn-cb" type="checkbox" name="selected_usns" value="{{ s.usn }}" id="usn_cb_{{ s.usn }}" onchange="updateSelectedCount()">
+                                    <label class="form-check-label small" for="usn_cb_{{ s.usn }}">
+                                        <strong class="font-monospace text-primary">{{ s.usn }}</strong> &ndash; {{ s.name or s.full_name }}
+                                    </label>
+                                </div>
+                            </div>
+                            {% endfor %}
                         </div>
                     </div>
                 </form>
@@ -142,7 +175,7 @@
                                     </div>
                                     {% if row.assigned_at %}
                                         <div class="small text-muted" style="font-size: 0.78rem;">
-                                            📅 {{ row.assigned_at.strftime('%d %b %Y, %I:%M %p') }}
+                                            📅 {{ row.assigned_at.strftime('%d %b %Y') }}
                                         </div>
                                     {% endif %}
                                 {% else %}
@@ -244,5 +277,69 @@
     </div>
     {% endif %}
 {% endfor %}
+
+<script>
+function toggleStudentSelection(mode) {
+    const container = document.getElementById('studentSelectionContainer');
+    const submitBtn = document.getElementById('generateSubmitBtn');
+    if (mode === 'selected') {
+        container.style.display = 'block';
+        updateSelectedCount();
+    } else {
+        container.style.display = 'none';
+        submitBtn.innerHTML = '🚀 Generate All';
+    }
+}
+
+function updateSelectedCount() {
+    const checked = document.querySelectorAll('.student-usn-cb:checked');
+    const badge = document.getElementById('selectedCountBadge');
+    const submitBtn = document.getElementById('generateSubmitBtn');
+    const mode = document.getElementById('targetModeSelect').value;
+    if (badge) badge.textContent = `${checked.length} selected`;
+    if (mode === 'selected' && submitBtn) {
+        submitBtn.innerHTML = `🎯 Generate Selected (${checked.length})`;
+    }
+}
+
+function setAllCheckboxes(checked) {
+    const visibleItems = document.querySelectorAll('.student-item');
+    visibleItems.forEach(item => {
+        if (item.style.display !== 'none') {
+            const cb = item.querySelector('.student-usn-cb');
+            if (cb) cb.checked = checked;
+        }
+    });
+    updateSelectedCount();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const filterInput = document.getElementById('studentFilterInput');
+    if (filterInput) {
+        filterInput.addEventListener('input', function() {
+            const q = this.value.toLowerCase().trim();
+            const items = document.querySelectorAll('.student-item');
+            items.forEach(item => {
+                const text = item.getAttribute('data-text') || '';
+                item.style.display = text.includes(q) ? '' : 'none';
+            });
+        });
+    }
+
+    const form = document.getElementById('generateQuizForm');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            const mode = document.getElementById('targetModeSelect').value;
+            if (mode === 'selected') {
+                const checked = document.querySelectorAll('.student-usn-cb:checked');
+                if (checked.length === 0) {
+                    e.preventDefault();
+                    alert('Please select at least one student from the list.');
+                }
+            }
+        });
+    }
+});
+</script>
 
 {% endblock %}

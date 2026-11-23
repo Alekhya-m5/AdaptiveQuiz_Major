@@ -32,7 +32,7 @@
                 <span>{{ quiz.questions|length }} questions &middot; {{ quiz.total_marks }} marks</span>
                 {% if quiz.published_at or quiz.created_at %}
                     <span class="text-muted">
-                        📅 {{ (quiz.published_at or quiz.created_at).strftime('%d %b %Y, %I:%M %p') }}
+                        📅 {{ (quiz.published_at or quiz.created_at).strftime('%d %b %Y') }}
                     </span>
                 {% endif %}
             </div>
