@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}AI Generated Questions &amp; LoRA Dataset{% endblock %}
+{% block title %}AI Question Generator &amp; Student Adaptive Hub{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <div>
-        <h3 class="mb-1">🤖 AI Question Generator &amp; LoRA Training Hub</h3>
-        <p class="text-muted mb-0">Generate RAG-grounded MCQs from uploaded materials for student practice and SFT fine-tuning.</p>
+        <h3 class="mb-1">🤖 AI Question Generator &amp; Student Adaptive Hub</h3>
+        <p class="text-muted mb-0">Generate RAG-grounded adaptive MCQs tailored to each student's ability (IRT) and topic mastery (BKT).</p>
     </div>
     <div class="d-flex gap-2">
         <a href="{{ url_for('teacher.materials') }}" class="btn btn-outline-secondary btn-sm">
@@ -13,7 +13,7 @@
         </a>
         <a href="{{ url_for('teacher.export_lora_dataset_jsonl') }}" class="btn btn-success btn-sm fw-bold">
             📥 Download LoRA Dataset (.jsonl)
-            <span class="badge bg-light text-dark ms-1">{{ counts.total }} Questions</span>
+            <span class="badge bg-light text-dark ms-1">{{ total_count }} Questions</span>
         </a>
     </div>
 </div>
@@ -26,9 +26,9 @@
             <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
                 <span class="fw-bold small">🤖 AI Model &amp; Adapter Status</span>
                 {% if model_status.loaded %}
-                    <span class="badge bg-success">Active / Loaded</span>
+                <span class="badge bg-success">Active / Loaded</span>
                 {% else %}
-                    <span class="badge bg-warning text-dark">Lazy / On-Demand</span>
+                <span class="badge bg-warning text-dark">On-Demand</span>
                 {% endif %}
             </div>
             <div class="card-body py-2">
@@ -37,7 +37,7 @@
                     <li class="mb-1"><strong>Adapter:</strong> <span class="badge bg-info text-dark">LoRA attached</span></li>
                     <li class="mb-1"><strong>Device:</strong> <code>{{ model_status.device }}</code></li>
                     {% if model_status.load_error %}
-                        <li class="text-danger"><strong>Error:</strong> {{ model_status.load_error }}</li>
+                    <li class="text-danger"><strong>Error:</strong> {{ model_status.load_error }}</li>
                     {% endif %}
                 </ul>
             </div>
@@ -58,22 +58,24 @@
                             <label class="form-label small fw-bold mb-1">Course</label>
                             <select name="course" class="form-select form-select-sm">
                                 {% for c in courses %}
-                                    <option value="{{ c }}">{{ c }}</option>
+                                <option value="{{ c }}" {{ 'selected' if c == selected_course else '' }}>{{ c }}</option>
                                 {% endfor %}
                             </select>
                         </div>
                         <div class="col-md-5">
                             <label class="form-label small fw-bold mb-1">Topic(s) <span class="text-muted fw-normal">(comma-separated)</span></label>
-                            <input type="text" name="concept_tag" class="form-control form-control-sm" list="conceptList" placeholder="e.g. Sampling, Hypothesis Testing" required>
+                            <input type="text" name="concept_tag" class="form-control form-control-sm"
+                                list="conceptList" placeholder="e.g. Types of IPR, Patents" required>
                             <datalist id="conceptList">
                                 {% for c in concepts %}
-                                    <option value="{{ c }}">
+                                <option value="{{ c }}">
                                 {% endfor %}
                             </datalist>
                         </div>
                         <div class="col-md-2">
                             <label class="form-label small fw-bold mb-1">Questions / Student</label>
-                            <input type="number" name="num_questions" class="form-control form-control-sm" min="1" max="20" value="3" placeholder="3" required>
+                            <input type="number" name="num_questions" class="form-control form-control-sm" min="1"
+                                max="20" value="3" placeholder="3" required>
                         </div>
                         <div class="col-md-3">
                             <button type="submit" class="btn btn-primary btn-sm w-100">
@@ -87,137 +89,160 @@
     </div>
 </div>
 
-<!-- Questions List Header & Concept Filter -->
-<div class="card shadow-sm mb-4">
-    <div class="card-body py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+<!-- Student Adaptive Quiz Status Table Card -->
+<div class="card shadow-sm mb-5">
+    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div class="d-flex align-items-center gap-2">
-            <span class="fw-bold small">Generated Questions ({{ records|length }})</span>
+            <h5 class="mb-0 fw-bold">📋 Student Adaptive Quiz Status</h5>
+            <span class="badge bg-secondary">Total: {{ total_students }}</span>
+            <span class="badge bg-success">Assigned: {{ assigned_count }} / {{ total_students }}</span>
         </div>
         <div>
             <form method="GET" action="{{ url_for('teacher.generated_questions') }}" class="d-flex gap-1">
-                <input type="text" name="concept" class="form-control form-control-sm" placeholder="Filter by concept..." value="{{ concept_filter }}">
-                <button type="submit" class="btn btn-sm btn-outline-secondary">Filter</button>
-                {% if concept_filter %}
-                    <a href="{{ url_for('teacher.generated_questions') }}" class="btn btn-sm btn-light">Clear</a>
+                <input type="hidden" name="course" value="{{ selected_course }}">
+                <input type="text" name="search" class="form-control form-control-sm" placeholder="Search USN or Name..." value="{{ search_query }}">
+                <button type="submit" class="btn btn-sm btn-outline-secondary">Search</button>
+                {% if search_query %}
+                    <a href="{{ url_for('teacher.generated_questions', course=selected_course) }}" class="btn btn-sm btn-light">Clear</a>
                 {% endif %}
             </form>
         </div>
     </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 5%;">#</th>
+                        <th style="width: 18%;">Student USN</th>
+                        <th style="width: 25%;">Student Name</th>
+                        <th style="width: 15%;">Ability (&theta;)</th>
+                        <th style="width: 22%;">Adaptive Quiz Status</th>
+                        <th style="width: 15%; text-align: center;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if student_rows %}
+                        {% for row in student_rows %}
+                        <tr>
+                            <td class="text-muted small">{{ loop.index }}</td>
+                            <td><strong class="font-monospace text-primary">{{ row.usn }}</strong></td>
+                            <td class="fw-semibold">{{ row.name }}</td>
+                            <td>
+                                <span class="badge {{ 'bg-success' if row.theta >= 1.0 else ('bg-info text-dark' if row.theta >= 0.0 else 'bg-secondary') }}">
+                                    &theta; = {{ '%.2f'|format(row.theta) }}
+                                </span>
+                            </td>
+                            <td>
+                                {% if row.is_assigned %}
+                                    <span class="badge bg-success py-1 px-2">✓ Assigned</span>
+                                    <div class="small text-muted mt-1">
+                                        {{ row.quiz.title }}
+                                        <span class="badge bg-light text-dark border ms-1">{{ row.questions_count }} Qs</span>
+                                    </div>
+                                    {% if row.assigned_at %}
+                                        <div class="small text-muted" style="font-size: 0.78rem;">
+                                            📅 {{ row.assigned_at.strftime('%d %b %Y, %I:%M %p') }}
+                                        </div>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge bg-secondary py-1 px-2">Not Assigned</span>
+                                    <div class="small text-muted mt-1">Ready for generation</div>
+                                {% endif %}
+                            </td>
+                            <td style="text-align: center;">
+                                {% if row.is_assigned and row.questions_count > 0 %}
+                                    <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalQuestions{{ row.usn }}">
+                                        👁️ View Questions
+                                    </button>
+                                {% else %}
+                                    <span class="text-muted small">-</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center py-4 text-muted">
+                                No students found enrolled in course <code>{{ selected_course }}</code>.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
-<!-- Questions Feed / Cards -->
-{% if records %}
-    <div class="d-flex flex-column gap-3 mb-5">
-        {% for q in records %}
-        <div class="card shadow-sm">
-            <div class="card-header bg-light d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
-                <div class="d-flex align-items-center gap-2">
-                    <span class="badge bg-dark">#{{ q.id }}</span>
-                    <span class="badge bg-primary">{{ q.course }}</span>
-                    <span class="badge bg-secondary">{{ q.concept_tag }}</span>
-                    <span class="badge bg-info text-dark">{{ q.target_difficulty }} ({{ q.target_bloom }})</span>
-                    {% if q.assigned_usn %}
-                        <span class="badge bg-success">👤 Assigned: {{ q.assigned_usn }}</span>
-                    {% endif %}
-                </div>
-                <div class="d-flex align-items-center gap-2">
-                    <span class="text-muted small">{{ q.created_at.strftime('%Y-%m-%d %H:%M') if q.created_at else '' }}</span>
-                </div>
-            </div>
-            <div class="card-body">
-                <!-- Pedagogical & Source Citation Bar -->
-                <div class="bg-light p-2 rounded mb-3 small d-flex justify-content-between flex-wrap gap-2">
+<!-- Modals for Viewing Questions Per Student -->
+{% for row in student_rows %}
+    {% if row.is_assigned and row.questions_count > 0 %}
+    <div class="modal fade" id="modalQuestions{{ row.usn }}" tabindex="-1" aria-labelledby="modalLabel{{ row.usn }}" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
                     <div>
-                        <strong>Adaptive Basis:</strong>
-                        IRT &theta;: <code>{{ '%.2f'|format(q.learner_theta) if q.learner_theta is not none else 'Default (0.0)' }}</code> |
-                        BKT Mastery: <code>{{ '%.2f'|format(q.learner_mastery) if q.learner_mastery is not none else 'Default (0.20)' }}</code>
+                        <h5 class="modal-title mb-0" id="modalLabel{{ row.usn }}">
+                            Assigned Questions for {{ row.name }} (<span class="font-monospace text-primary">{{ row.usn }}</span>)
+                        </h5>
+                        <p class="small text-muted mb-0">
+                            {{ row.quiz.title }} &middot; Calibrated Ability &theta;: <code>{{ '%.2f'|format(row.theta) }}</code>
+                        </p>
                     </div>
-                    <div>
-                        <strong>Grounded Citation:</strong>
-                        <span class="badge bg-secondary">{{ q.source_filename or 'Course Material' }}</span>
-                        {% if q.source_page_or_slide %}
-                            <span class="badge bg-warning text-dark">{{ q.source_page_or_slide }}</span>
-                        {% endif %}
-                        | Grounding Score: <code>{{ '%.2f'|format(q.quality_score or 0.0) }}</code>
-                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-
-                <!-- Question Text -->
-                <h6 class="fw-bold mb-3">{{ q.question_text }}</h6>
-
-                <!-- Options Grid -->
-                <div class="row g-2 mb-3">
-                    <div class="col-md-6">
-                        <div class="p-2 border rounded {{ 'bg-success bg-opacity-10 border-success fw-bold' if q.correct_option == 'A' else 'bg-white' }}">
-                            <strong>A.</strong> {{ q.option_a }}
-                            {% if q.correct_option == 'A' %}<span class="badge bg-success ms-1">✓ Correct</span>{% endif %}
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="p-2 border rounded {{ 'bg-success bg-opacity-10 border-success fw-bold' if q.correct_option == 'B' else 'bg-white' }}">
-                            <strong>B.</strong> {{ q.option_b }}
-                            {% if q.correct_option == 'B' %}<span class="badge bg-success ms-1">✓ Correct</span>{% endif %}
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="p-2 border rounded {{ 'bg-success bg-opacity-10 border-success fw-bold' if q.correct_option == 'C' else 'bg-white' }}">
-                            <strong>C.</strong> {{ q.option_c }}
-                            {% if q.correct_option == 'C' %}<span class="badge bg-success ms-1">✓ Correct</span>{% endif %}
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="p-2 border rounded {{ 'bg-success bg-opacity-10 border-success fw-bold' if q.correct_option == 'D' else 'bg-white' }}">
-                            <strong>D.</strong> {{ q.option_d }}
-                            {% if q.correct_option == 'D' %}<span class="badge bg-success ms-1">✓ Correct</span>{% endif %}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Explanation -->
-                <div class="alert alert-light border py-2 px-3 small mb-3">
-                    <strong>Explanation:</strong> {{ q.explanation }}
-                </div>
-
-                <!-- Collapsible Retrieved Source Chunk -->
-                <div class="accordion accordion-flush mb-3" id="accordionChunk{{ q.id }}">
-                    <div class="accordion-item border rounded">
-                        <h2 class="accordion-header" id="heading{{ q.id }}">
-                            <button class="accordion-button collapsed py-2 small" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ q.id }}">
-                                🔍 View Retrieved Grounding Context Chunk
-                            </button>
-                        </h2>
-                        <div id="collapse{{ q.id }}" class="accordion-collapse collapse" data-bs-parent="#accordionChunk{{ q.id }}">
-                            <div class="accordion-body bg-light small font-monospace" style="white-space: pre-wrap; max-height: 200px; overflow-y: auto;">
-                                {{ q.source_context }}
+                <div class="modal-body">
+                    <div class="d-flex flex-column gap-3">
+                        {% for q in row.questions %}
+                        <div class="card shadow-sm border">
+                            <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="badge bg-primary">Q{{ loop.index }}</span>
+                                    <span class="badge bg-info text-dark">{{ q.difficulty }}</span>
+                                    <span class="badge bg-light text-dark border">{{ q.concept_tag }}</span>
+                                </div>
+                                <span class="badge bg-light text-dark border">{{ q.marks }} mark{{ 's' if q.marks != 1 else '' }}</span>
+                            </div>
+                            <div class="card-body">
+                                <h6 class="fw-bold mb-3">{{ q.question_text }}</h6>
+                                <div class="row g-2 mb-2">
+                                    <div class="col-md-6">
+                                        <div class="p-2 border rounded {{ 'bg-success bg-opacity-10 border-success fw-bold' if q.correct_option == 'A' else 'bg-white' }}">
+                                            <strong>A.</strong> {{ q.option_a }}
+                                            {% if q.correct_option == 'A' %}<span class="badge bg-success ms-1">✓ Correct</span>{% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="p-2 border rounded {{ 'bg-success bg-opacity-10 border-success fw-bold' if q.correct_option == 'B' else 'bg-white' }}">
+                                            <strong>B.</strong> {{ q.option_b }}
+                                            {% if q.correct_option == 'B' %}<span class="badge bg-success ms-1">✓ Correct</span>{% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="p-2 border rounded {{ 'bg-success bg-opacity-10 border-success fw-bold' if q.correct_option == 'C' else 'bg-white' }}">
+                                            <strong>C.</strong> {{ q.option_c }}
+                                            {% if q.correct_option == 'C' %}<span class="badge bg-success ms-1">✓ Correct</span>{% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="p-2 border rounded {{ 'bg-success bg-opacity-10 border-success fw-bold' if q.correct_option == 'D' else 'bg-white' }}">
+                                            <strong>D.</strong> {{ q.option_d }}
+                                            {% if q.correct_option == 'D' %}<span class="badge bg-success ms-1">✓ Correct</span>{% endif %}
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
+                        {% endfor %}
                     </div>
                 </div>
-
-                <!-- Add to Classical Quiz (if quizzes exist) -->
-                {% if teacher_quizzes %}
-                <div class="d-flex justify-content-end align-items-center pt-2 border-top">
-                    <form action="{{ url_for('teacher.add_to_quiz', record_id=q.id) }}" method="POST" class="d-flex gap-1 align-items-center">
-                        <select name="quiz_id" class="form-select form-select-sm" style="width: auto;" required>
-                            <option value="">-- Add to Classical Quiz --</option>
-                            {% for tq in teacher_quizzes %}
-                                <option value="{{ tq.id }}">{{ tq.title }}</option>
-                            {% endfor %}
-                        </select>
-                        <button type="submit" class="btn btn-sm btn-secondary">Add</button>
-                    </form>
+                <div class="modal-footer bg-light py-2">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
                 </div>
-                {% endif %}
             </div>
         </div>
-        {% endfor %}
     </div>
-{% else %}
-    <div class="card shadow-sm text-center py-5">
-        <div class="card-body">
-            <h5 class="text-muted">No Generated Questions Found</h5>
-            <p class="text-muted small">Upload course materials and specify the number of questions to generate above!</p>
-        </div>
-    </div>
-{% endif %}
+    {% endif %}
+{% endfor %}
+
 {% endblock %}

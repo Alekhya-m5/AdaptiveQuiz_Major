@@ -502,7 +502,7 @@ class TestRAGPipeline(unittest.TestCase):
             "/teacher/generated-questions/generate",
             data={
                 "course": "RM",
-                "concept_tag": "Sampling, Research Design",
+                "concept_tag": "Sampling",
                 "num_questions": "3",
             },
             follow_redirects=True,

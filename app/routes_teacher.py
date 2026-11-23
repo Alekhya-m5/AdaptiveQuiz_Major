@@ -18,6 +18,7 @@ from .auth import teacher_required
 from .routes_student import AVAILABLE_COURSES
 from app.rag import RAGService, retrieve_context
 from app.ai import generate_adaptive_question, export_approved_dataset_jsonl, QwenLoRAModelService
+from app.ai.adaptive_engine import AdaptiveEngine
 
 
 def interpret_theta(theta):
@@ -1339,7 +1340,7 @@ def view_chunks(doc_id):
 @teacher_bp.route("/generated-questions")
 @teacher_required
 def generated_questions():
-    """Teacher portal for AI-generated MCQs."""
+    """Teacher portal for AI-generated adaptive questions and student assignment status."""
     # Auto-migrate any legacy pending_review records to approved
     legacy_pending = GeneratedQuestionRecord.query.filter_by(validation_status="pending_review").all()
     if legacy_pending:
@@ -1347,18 +1348,59 @@ def generated_questions():
             p.validation_status = "approved"
         db.session.commit()
 
-    status_filter = request.args.get("status", "all").strip().lower()
-    concept_filter = request.args.get("concept", "").strip()
+    selected_course = request.args.get("course", AVAILABLE_COURSES[0]).strip()
+    search_query = request.args.get("search", "").strip()
 
-    query = GeneratedQuestionRecord.query
-    if status_filter != "all":
-        query = query.filter_by(validation_status=status_filter)
-    if concept_filter:
-        query = query.filter(GeneratedQuestionRecord.concept_tag.ilike(f"%{concept_filter}%"))
+    students_query = Student.query.filter_by(course=selected_course)
+    if search_query:
+        students_query = students_query.filter(
+            (Student.usn.ilike(f"%{search_query}%")) |
+            (Student.first_name.ilike(f"%{search_query}%")) |
+            (Student.last_name.ilike(f"%{search_query}%"))
+        )
+    students = students_query.order_by(Student.usn.asc()).all()
 
-    records = query.order_by(GeneratedQuestionRecord.created_at.desc()).all()
+    # Pre-fetch StudentTheta records
+    theta_map = {
+        st.usn: st.theta for st in StudentTheta.query.filter(
+            StudentTheta.usn.in_([s.usn for s in students])
+        ).all()
+    } if students else {}
+
+    # Fetch latest assigned quiz for each student
+    assigned_quizzes = (
+        Quiz.query.filter(Quiz.assigned_usn.in_([s.usn for s in students]))
+        .order_by(Quiz.created_at.desc())
+        .all()
+    ) if students else []
+
+    student_quiz_map = {}
+    for qz in assigned_quizzes:
+        if qz.assigned_usn not in student_quiz_map:
+            student_quiz_map[qz.assigned_usn] = qz
+
+    student_rows = []
+    assigned_count = 0
+    for s in students:
+        s_theta = theta_map.get(s.usn, 0.0)
+        latest_quiz = student_quiz_map.get(s.usn)
+        is_assigned = latest_quiz is not None
+        if is_assigned:
+            assigned_count += 1
+
+        student_rows.append({
+            "usn": s.usn,
+            "name": s.full_name,
+            "theta": s_theta,
+            "is_assigned": is_assigned,
+            "status": "Assigned" if is_assigned else "Not Assigned",
+            "quiz": latest_quiz,
+            "questions_count": len(latest_quiz.questions) if latest_quiz else 0,
+            "assigned_at": latest_quiz.created_at if latest_quiz else None,
+            "questions": latest_quiz.questions if latest_quiz else [],
+        })
+
     total_count = GeneratedQuestionRecord.query.count()
-
     counts = {
         "pending_review": 0,
         "approved": total_count,
@@ -1369,10 +1411,7 @@ def generated_questions():
 
     model_status = QwenLoRAModelService.get_instance().get_status()
 
-    # Get available teacher quizzes to allow quick addition
-    teacher_quizzes = Quiz.query.filter_by(teacher_id=session["user_id"]).order_by(Quiz.created_at.desc()).all()
-
-    # Get available concepts from StudentMastery or ImportedResponse
+    # Get available concepts
     concepts = [
         c[0] for c in db.session.query(DocumentChunk.concept_tag)
         .filter(DocumentChunk.concept_tag.isnot(None))
@@ -1385,13 +1424,14 @@ def generated_questions():
 
     return render_template(
         "teacher/generated_questions.html",
-        records=records,
+        student_rows=student_rows,
+        total_students=len(students),
+        assigned_count=assigned_count,
+        selected_course=selected_course,
+        search_query=search_query,
         counts=counts,
         total_count=total_count,
-        status_filter=status_filter,
-        concept_filter=concept_filter,
         model_status=model_status,
-        teacher_quizzes=teacher_quizzes,
         concepts=concepts,
         courses=AVAILABLE_COURSES,
     )
@@ -1419,23 +1459,72 @@ def trigger_generation():
     except (TypeError, ValueError):
         num_questions = 3
 
-    # 1. Fetch all students enrolled in the selected course
     students = Student.query.filter_by(course=course).all()
     if not students:
         flash(f"No students currently enrolled in course '{course}'.", "warning")
         return redirect(url_for("teacher.generated_questions"))
 
     topics_str = ", ".join(topics)
-    total_generated = 0
-    students_served = 0
     diff_val_map = {"Easy": -1.0, "Medium": 0.0, "Hard": 1.0}
 
+    # Step 1: Determine adaptive challenge level for each student and collect needed tiers
+    student_requirements = []
+    needed_tiers = set()
+
     for student in students:
-        # Retrieve individual IRT ability
         st = StudentTheta.query.filter_by(usn=student.usn).first()
         student_theta = st.theta if st else 0.0
 
-        # Create a personalized Quiz assigned to this student
+        student_q_plans = []
+        for q_idx in range(num_questions):
+            topic = topics[q_idx % len(topics)]
+            sm = StudentMastery.query.filter_by(usn=student.usn, concept_tag=topic).first()
+            student_mastery = sm.mastery if sm else 0.20
+
+            challenge = AdaptiveEngine.determine_challenge_level(
+                theta=student_theta,
+                mastery=student_mastery,
+                concept_tag=topic,
+            )
+            difficulty = challenge["difficulty"]
+            bloom = challenge["bloom_level"]
+            needed_tiers.add((topic, difficulty))
+            student_q_plans.append({
+                "topic": topic,
+                "difficulty": difficulty,
+                "bloom": bloom,
+                "theta": student_theta,
+                "mastery": student_mastery,
+            })
+
+        student_requirements.append({
+            "student": student,
+            "plans": student_q_plans,
+        })
+
+    # Step 2: Generate questions for each needed (topic, difficulty) tier
+    tier_pool = {}
+    for (topic, diff) in needed_tiers:
+        tier_pool[(topic, diff)] = []
+        for _ in range(num_questions):
+            try:
+                res = generate_adaptive_question(
+                    course=course,
+                    concept_tag=topic,
+                    target_difficulty_override=diff,
+                )
+                tier_pool[(topic, diff)].append(res)
+            except Exception as e:
+                pass
+
+    # Step 3: Assign personalized quizzes to all enrolled students
+    students_served = 0
+    now = datetime.utcnow()
+
+    for item in student_requirements:
+        student = item["student"]
+        plans = item["plans"]
+
         quiz_title = f"Adaptive Practice: {topics_str}"
         student_quiz = Quiz(
             title=quiz_title,
@@ -1443,62 +1532,49 @@ def trigger_generation():
             teacher_id=session["user_id"],
             is_published=True,
             assigned_usn=student.usn,
-            published_at=datetime.utcnow(),
+            created_at=now,
+            published_at=now,
         )
         db.session.add(student_quiz)
         db.session.flush()
 
-        for q_idx in range(num_questions):
-            topic = topics[q_idx % len(topics)]
+        for q_idx, plan in enumerate(plans):
+            topic = plan["topic"]
+            diff = plan["difficulty"]
+            pool = tier_pool.get((topic, diff), [])
 
-            # Retrieve individual BKT mastery for this topic
-            sm = StudentMastery.query.filter_by(usn=student.usn, concept_tag=topic).first()
-            student_mastery = sm.mastery if sm else 0.20
-
-            # Generate personalized question using AdaptiveEngine
-            try:
-                res = generate_adaptive_question(
-                    course=course,
-                    concept_tag=topic,
-                    usn=student.usn,
-                    student_theta=student_theta,
-                    concept_mastery=student_mastery,
-                    target_difficulty_override=None,
-                    assigned_usn=student.usn,
-                )
-
+            if pool:
+                q_data = pool[q_idx % len(pool)]
                 q_item = Question(
                     quiz_id=student_quiz.id,
                     order_index=q_idx,
-                    question_text=res["question"],
-                    option_a=res["options"]["A"],
-                    option_b=res["options"]["B"],
-                    option_c=res["options"]["C"],
-                    option_d=res["options"]["D"],
-                    correct_option=res["correct_option"],
+                    question_text=q_data["question"],
+                    option_a=q_data["options"]["A"],
+                    option_b=q_data["options"]["B"],
+                    option_c=q_data["options"]["C"],
+                    option_d=q_data["options"]["D"],
+                    correct_option=q_data["correct_option"],
                     concept_tag=topic,
                     topic=topic,
-                    difficulty=res["target_difficulty"],
-                    difficulty_value=diff_val_map.get(res["target_difficulty"], 0.0),
+                    difficulty=diff,
+                    difficulty_value=diff_val_map.get(diff, 0.0),
                     marks=1.0,
                 )
                 db.session.add(q_item)
-                total_generated += 1
-            except Exception as e:
-                continue
+
+                rec_id = q_data.get("record_id")
+                if rec_id:
+                    rec = GeneratedQuestionRecord.query.get(rec_id)
+                    if rec:
+                        rec.assigned_usn = student.usn
 
         students_served += 1
 
     db.session.commit()
-
-    if total_generated > 0:
-        flash(
-            f"Successfully generated {total_generated} personalized question(s) assigned to {students_served} student(s) for topic(s): {topics_str}.",
-            "success",
-        )
-    else:
-        flash("Generation completed with errors. Please check materials and try again.", "danger")
-
+    flash(
+        f"Adaptive quiz successfully generated and assigned for ALL {students_served} student(s) across topic(s): {topics_str}!",
+        "success",
+    )
     return redirect(url_for("teacher.generated_questions"))
 
 
