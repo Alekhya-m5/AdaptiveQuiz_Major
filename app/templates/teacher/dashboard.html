@@ -152,16 +152,24 @@
                     {% for quiz in quizzes %}
                     <tr>
                         <td class="fw-semibold">{{ quiz.title }}</td>
-                        <td>{{ quiz.course }}</td>
+                        <td><span class="badge bg-secondary">{{ quiz.course }}</span></td>
                         <td class="text-center">{{ quiz.questions|length }}</td>
                         <td>
                             {% if quiz.is_published %}
-                                <span class="badge bg-success">Published</span>
+                                <span class="badge bg-success">Published (Flooded to Students)</span>
                             {% else %}
-                                <span class="badge bg-secondary">Draft</span>
+                                <span class="badge bg-secondary">Draft (Unpublished)</span>
                             {% endif %}
                         </td>
                         <td class="text-end">
+                            {% if not quiz.is_published %}
+                            <form action="{{ url_for('teacher.publish_quiz', quiz_id=quiz.id) }}" method="POST" class="d-inline">
+                                <input type="hidden" name="next" value="{{ url_for('teacher.dashboard') }}">
+                                <button type="submit" class="btn btn-sm btn-success" title="Publish and flood to all students">
+                                    🚀 Publish Quiz
+                                </button>
+                            </form>
+                            {% endif %}
                             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('teacher.quiz_detail', quiz_id=quiz.id) }}">Manage</a>
                             {% if quiz.is_published %}
                             <a class="btn btn-sm btn-outline-success" href="{{ url_for('teacher.quiz_dashboard', quiz_id=quiz.id) }}">Results</a>

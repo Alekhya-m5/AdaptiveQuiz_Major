@@ -227,142 +227,21 @@ def result_detail(attempt_id):
 
 
 # ---------------------------------------------------------------------------
-# Adaptive RAG Quiz Generation & Practice
+# Adaptive RAG Quiz Generation & Practice (Disabled for Students)
 # ---------------------------------------------------------------------------
 
 @student_bp.route("/adaptive-quiz", methods=["GET", "POST"])
 @student_required
 def adaptive_quiz():
-    """Personalized adaptive practice quiz powered by RAG, IRT, BKT, and Qwen+LoRA."""
-    student = Student.query.get_or_404(session["user_id"])
-    theta_rec = StudentTheta.query.filter_by(usn=student.usn).first()
-    current_theta = theta_rec.theta if theta_rec else 0.0
-
-    # Fetch available concepts from documents and past masteries
-    chunk_concepts = [
-        c[0] for c in db.session.query(DocumentChunk.concept_tag)
-        .filter(DocumentChunk.concept_tag.isnot(None))
-        .distinct().all()
-    ]
-    mastery_concepts = [
-        m.concept_tag for m in StudentMastery.query.filter_by(usn=student.usn).all()
-    ]
-    all_concepts = sorted(list(set(chunk_concepts + mastery_concepts)))
-
-    # Identify lowest mastery concept for targeted recommendation
-    lowest_mastery_rec = (
-        StudentMastery.query.filter_by(usn=student.usn)
-        .order_by(StudentMastery.mastery.asc())
-        .first()
-    )
-    recommended_concept = lowest_mastery_rec.concept_tag if lowest_mastery_rec else (
-        all_concepts[0] if all_concepts else "Research Approaches"
-    )
-
-    if request.method == "POST":
-        selected_concept = request.form.get("concept", recommended_concept).strip()
-        num_questions = min(3, max(1, int(request.form.get("num_questions", 1))))
-
-        questions_list = []
-        for _ in range(num_questions):
-            q_res = generate_adaptive_question(
-                course=student.course,
-                concept_tag=selected_concept,
-                usn=student.usn,
-            )
-            questions_list.append(q_res)
-
-        return render_template(
-            "student/take_adaptive_quiz.html",
-            student=student,
-            concept=selected_concept,
-            current_theta=current_theta,
-            questions=questions_list,
-        )
-
-    return render_template(
-        "student/adaptive_quiz_setup.html",
-        student=student,
-        current_theta=current_theta,
-        all_concepts=all_concepts,
-        recommended_concept=recommended_concept,
-    )
+    """Student self-generation is disabled per curriculum assessment policy."""
+    flash("Self-practice quiz generation is disabled. Please attempt quizzes assigned and published by your instructor.", "info")
+    return redirect(url_for("student.dashboard"))
 
 
 @student_bp.route("/adaptive-quiz/submit", methods=["POST"])
 @student_required
 def submit_adaptive_quiz():
-    """Grade adaptive practice quiz and incrementally update student IRT theta and BKT mastery."""
-    student = Student.query.get_or_404(session["user_id"])
-    concept = request.form.get("concept", "Research Approaches").strip()
-
-    record_ids = request.form.getlist("record_ids[]")
-    results = []
-    total_correct = 0
-
-    theta_rec = StudentTheta.query.filter_by(usn=student.usn).first()
-    if not theta_rec:
-        theta_rec = StudentTheta(usn=student.usn, theta=0.0, quizzes_attempted=0)
-        db.session.add(theta_rec)
-        db.session.commit()
-
-    mastery_rec = StudentMastery.query.filter_by(usn=student.usn, concept_tag=concept).first()
-    if not mastery_rec:
-        mastery_rec = StudentMastery(usn=student.usn, concept_tag=concept, mastery=0.20, attempts=0)
-        db.session.add(mastery_rec)
-        db.session.commit()
-
-    theta_before = theta_rec.theta
-    mastery_before = mastery_rec.mastery
-
-    for r_id in record_ids:
-        rec = GeneratedQuestionRecord.query.get(int(r_id))
-        if not rec:
-            continue
-
-        user_choice = request.form.get(f"choice_{rec.id}", "").strip().upper()
-        is_correct = (user_choice == rec.correct_option)
-        if is_correct:
-            total_correct += 1
-
-        # Numerical difficulty
-        diff_num = {"Easy": -1.0, "Medium": 0.0, "Hard": 1.0}.get(rec.target_difficulty, 0.0)
-
-        # Update IRT theta
-        theta_rec.theta = update_theta(theta_rec.theta, diff_num, is_correct)
-        theta_rec.responses_count = (theta_rec.responses_count or 0) + 1
-        if is_correct:
-            theta_rec.correct_count = (theta_rec.correct_count or 0) + 1
-
-        # Update BKT concept mastery
-        mastery_rec.mastery = BKTService.update_mastery(mastery_rec.mastery, is_correct)
-        mastery_rec.attempts = (mastery_rec.attempts or 0) + 1
-        if is_correct:
-            mastery_rec.correct_count = (mastery_rec.correct_count or 0) + 1
-
-        results.append({
-            "record": rec,
-            "user_choice": user_choice,
-            "is_correct": is_correct,
-            "correct_option": rec.correct_option,
-            "explanation": rec.explanation,
-            "source_ref": rec.source_page_or_slide,
-        })
-
-    theta_rec.updated_at = datetime.utcnow()
-    mastery_rec.last_updated = datetime.utcnow()
-    db.session.commit()
-
-    return render_template(
-        "student/adaptive_quiz_result.html",
-        student=student,
-        concept=concept,
-        results=results,
-        total_questions=len(results),
-        total_correct=total_correct,
-        theta_before=round(theta_before, 3),
-        theta_after=round(theta_rec.theta, 3),
-        mastery_before=round(mastery_before, 3),
-        mastery_after=round(mastery_rec.mastery, 3),
-    )
+    """Student self-practice quiz submission is disabled."""
+    flash("Self-practice quiz submission is disabled. Please attempt quizzes assigned by your instructor.", "warning")
+    return redirect(url_for("student.dashboard"))
 

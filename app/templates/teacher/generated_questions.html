@@ -48,7 +48,7 @@
     <div class="col-lg-8">
         <div class="card shadow-sm h-100 border-primary">
             <div class="card-header bg-primary text-white py-2 d-flex justify-content-between align-items-center">
-                <span class="fw-bold small">⚡ On-Demand Adaptive MCQ Generator (All Enrolled Students)</span>
+                <span class="fw-bold small">⚡ AI MCQ Generator &amp; Class Flooding (All Enrolled Students)</span>
                 <span class="badge bg-light text-primary small">Auto IRT &amp; BKT Calibration</span>
             </div>
             <div class="card-body py-2">
@@ -62,9 +62,13 @@
                                 {% endfor %}
                             </select>
                         </div>
-                        <div class="col-md-5">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold mb-1">Quiz Title <span class="text-muted fw-normal">(optional)</span></label>
+                            <input type="text" name="quiz_title" class="form-control form-control-sm" placeholder="e.g. Assessment Quiz">
+                        </div>
+                        <div class="col-md-3">
                             <label class="form-label small fw-bold mb-1">Topic(s) <span class="text-muted fw-normal">(comma-separated)</span></label>
-                            <input type="text" name="concept_tag" class="form-control form-control-sm" list="conceptList" placeholder="e.g. Sampling, Hypothesis Testing" required>
+                            <input type="text" name="concept_tag" class="form-control form-control-sm" list="conceptList" placeholder="e.g. Sampling, Hypothesis" required>
                             <datalist id="conceptList">
                                 {% for c in concepts %}
                                     <option value="{{ c }}">
@@ -72,14 +76,20 @@
                             </datalist>
                         </div>
                         <div class="col-md-2">
-                            <label class="form-label small fw-bold mb-1">Questions / Student</label>
-                            <input type="number" name="num_questions" class="form-control form-control-sm" min="1" max="20" value="3" placeholder="3" required>
+                            <label class="form-label small fw-bold mb-1">Questions</label>
+                            <input type="number" name="num_questions" class="form-control form-control-sm" min="1" max="20" value="5" placeholder="5" required>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <button type="submit" class="btn btn-primary btn-sm w-100">
-                                🚀 Generate for All Students
+                                🚀 Generate &amp; Flood
                             </button>
                         </div>
+                    </div>
+                    <div class="form-check form-switch mt-2">
+                        <input class="form-check-input" type="checkbox" name="publish_now" id="publishNowCheck" value="1" checked>
+                        <label class="form-check-label small fw-semibold" for="publishNowCheck">
+                            Publish immediately (flood quiz to all enrolled students' dashboards)
+                        </label>
                     </div>
                 </form>
             </div>
@@ -118,6 +128,8 @@
                     <span class="badge bg-info text-dark">{{ q.target_difficulty }} ({{ q.target_bloom }})</span>
                     {% if q.assigned_usn %}
                         <span class="badge bg-success">👤 Assigned: {{ q.assigned_usn }}</span>
+                    {% else %}
+                        <span class="badge bg-primary">👥 All Students (Course-Wide)</span>
                     {% endif %}
                 </div>
                 <div class="d-flex align-items-center gap-2">

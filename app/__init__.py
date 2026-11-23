@@ -74,6 +74,9 @@ def _run_schema_migrations():
                         ALTER COLUMN target_bloom TYPE VARCHAR(100),
                         ALTER COLUMN validation_status TYPE VARCHAR(50),
                         ALTER COLUMN reviewed_by TYPE VARCHAR(100);
+                    ALTER TABLE generated_question_records DROP CONSTRAINT IF EXISTS generated_question_records_source_document_id_fkey;
+                    ALTER TABLE generated_question_records ADD CONSTRAINT generated_question_records_source_document_id_fkey
+                        FOREIGN KEY (source_document_id) REFERENCES course_documents(id) ON DELETE SET NULL;
                 """))
                 conn.commit()
     except Exception:

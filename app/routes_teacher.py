@@ -258,7 +258,13 @@ def publish_quiz(quiz_id):
     quiz.is_published = True
     quiz.published_at = datetime.utcnow()
     db.session.commit()
-    flash("Quiz published. All students in this course now see it.", "success")
+
+    enrolled_count = Student.query.filter_by(course=quiz.course).count()
+    flash(f"Quiz '{quiz.title}' published successfully! It has been flooded to all {enrolled_count} students in course '{quiz.course}'.", "success")
+
+    next_url = request.form.get("next") or request.referrer
+    if next_url and ("dashboard" in next_url or "materials" in next_url):
+        return redirect(next_url)
     return redirect(url_for("teacher.quiz_detail", quiz_id=quiz.id))
 
 
@@ -1401,11 +1407,12 @@ def generated_questions():
 @teacher_required
 def trigger_generation():
     """
-    Teacher triggers on-demand RAG adaptive question generation for ALL enrolled students.
-    Personalizes difficulty for each student based on individual IRT theta and BKT mastery.
-    Assigns the generated quiz directly to each student's dashboard.
+    Teacher triggers on-demand RAG adaptive question generation.
+    Generates a unified course assessment quiz and floods it directly to all enrolled students' logins.
+    When students attempt and submit this quiz, their individual IRT theta and BKT mastery update automatically.
     """
     course = request.form.get("course", "RM").strip()
+    quiz_title = request.form.get("quiz_title", "").strip()
     raw_topics = request.form.get("concept_tag") or request.form.get("topics") or ""
     topics = [t.strip() for t in raw_topics.split(",") if t.strip()]
 
@@ -1414,92 +1421,90 @@ def trigger_generation():
         return redirect(url_for("teacher.generated_questions"))
 
     try:
-        num_questions = int(request.form.get("num_questions", 3))
+        num_questions = int(request.form.get("num_questions", 5))
         num_questions = max(1, min(num_questions, 20))
     except (TypeError, ValueError):
-        num_questions = 3
+        num_questions = 5
 
-    # 1. Fetch all students enrolled in the selected course
-    students = Student.query.filter_by(course=course).all()
-    if not students:
-        flash(f"No students currently enrolled in course '{course}'.", "warning")
-        return redirect(url_for("teacher.generated_questions"))
+    # Check whether the teacher chose to publish immediately (flooding to all students)
+    if "publish_now" in request.form:
+        publish_now = request.form.get("publish_now") in ["1", "true", "on", True]
+    else:
+        # Default to True when invoked programmatically or by default
+        publish_now = True
 
     topics_str = ", ".join(topics)
-    total_generated = 0
-    students_served = 0
+    if not quiz_title:
+        quiz_title = f"Assessment Quiz: {topics_str}"
+
+    enrolled_count = Student.query.filter_by(course=course).count()
+
+    # 1. Create a unified course-wide Quiz (assigned_usn=None floods to all students enrolled in this course)
+    quiz = Quiz(
+        title=quiz_title,
+        course=course,
+        teacher_id=session["user_id"],
+        is_published=publish_now,
+        assigned_usn=None,  # None means course-wide / flooded to all enrolled students
+        published_at=datetime.utcnow() if publish_now else None,
+    )
+    db.session.add(quiz)
+    db.session.flush()
+
     diff_val_map = {"Easy": -1.0, "Medium": 0.0, "Hard": 1.0}
+    total_generated = 0
 
-    for student in students:
-        # Retrieve individual IRT ability
-        st = StudentTheta.query.filter_by(usn=student.usn).first()
-        student_theta = st.theta if st else 0.0
+    for q_idx in range(num_questions):
+        topic = topics[q_idx % len(topics)]
+        try:
+            res = generate_adaptive_question(
+                course=course,
+                concept_tag=topic,
+                usn=None,
+                assigned_usn=None,
+            )
+            q_item = Question(
+                quiz_id=quiz.id,
+                order_index=q_idx,
+                question_text=res["question"],
+                option_a=res["options"]["A"],
+                option_b=res["options"]["B"],
+                option_c=res["options"]["C"],
+                option_d=res["options"]["D"],
+                correct_option=res["correct_option"],
+                concept_tag=topic,
+                topic=topic,
+                difficulty=res["target_difficulty"],
+                difficulty_value=diff_val_map.get(res["target_difficulty"], 0.0),
+                marks=1.0,
+            )
+            db.session.add(q_item)
+            total_generated += 1
+        except Exception as e:
+            logger.warning(f"Failed to generate question {q_idx + 1} for topic '{topic}': {e}")
+            continue
 
-        # Create a personalized Quiz assigned to this student
-        quiz_title = f"Adaptive Practice: {topics_str}"
-        student_quiz = Quiz(
-            title=quiz_title,
-            course=course,
-            teacher_id=session["user_id"],
-            is_published=True,
-            assigned_usn=student.usn,
-            published_at=datetime.utcnow(),
-        )
-        db.session.add(student_quiz)
-        db.session.flush()
-
-        for q_idx in range(num_questions):
-            topic = topics[q_idx % len(topics)]
-
-            # Retrieve individual BKT mastery for this topic
-            sm = StudentMastery.query.filter_by(usn=student.usn, concept_tag=topic).first()
-            student_mastery = sm.mastery if sm else 0.20
-
-            # Generate personalized question using AdaptiveEngine
-            try:
-                res = generate_adaptive_question(
-                    course=course,
-                    concept_tag=topic,
-                    usn=student.usn,
-                    student_theta=student_theta,
-                    concept_mastery=student_mastery,
-                    target_difficulty_override=None,
-                    assigned_usn=student.usn,
-                )
-
-                q_item = Question(
-                    quiz_id=student_quiz.id,
-                    order_index=q_idx,
-                    question_text=res["question"],
-                    option_a=res["options"]["A"],
-                    option_b=res["options"]["B"],
-                    option_c=res["options"]["C"],
-                    option_d=res["options"]["D"],
-                    correct_option=res["correct_option"],
-                    concept_tag=topic,
-                    topic=topic,
-                    difficulty=res["target_difficulty"],
-                    difficulty_value=diff_val_map.get(res["target_difficulty"], 0.0),
-                    marks=1.0,
-                )
-                db.session.add(q_item)
-                total_generated += 1
-            except Exception as e:
-                continue
-
-        students_served += 1
+    if total_generated == 0:
+        db.session.rollback()
+        flash("Could not generate questions. Please ensure course materials are uploaded and try again.", "danger")
+        return redirect(url_for("teacher.generated_questions"))
 
     db.session.commit()
 
-    if total_generated > 0:
+    if publish_now:
         flash(
-            f"Successfully generated {total_generated} personalized question(s) assigned to {students_served} student(s) for topic(s): {topics_str}.",
+            f"Successfully generated {total_generated} question(s) and published '{quiz_title}'! "
+            f"This quiz is now flooded to all {enrolled_count} enrolled student(s) in {course}.",
             "success",
         )
     else:
-        flash("Generation completed with errors. Please check materials and try again.", "danger")
+        flash(
+            f"Successfully generated {total_generated} question(s) for quiz '{quiz_title}' (Draft). "
+            f"Click 'Publish Quiz' whenever you are ready to flood it to all {enrolled_count} enrolled students.",
+            "info",
+        )
 
-    return redirect(url_for("teacher.generated_questions"))
+    return redirect(url_for("teacher.quiz_detail", quiz_id=quiz.id))
 
 
 @teacher_bp.route("/generated-questions/<int:record_id>/approve", methods=["POST"])

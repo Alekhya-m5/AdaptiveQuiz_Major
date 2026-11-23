@@ -78,7 +78,15 @@ class TestRAGPipeline(unittest.TestCase):
         db.session.add_all([self.theta, self.mastery])
         db.session.commit()
 
+        # Prevent tests from hanging on network calls to Hugging Face
+        self.patcher_load_model = mock.patch(
+            "app.ai.model_service.QwenLoRAModelService.load_model",
+            return_value=(False, "Test offline fallback")
+        )
+        self.patcher_load_model.start()
+
     def tearDown(self):
+        self.patcher_load_model.stop()
         db.session.remove()
         db.drop_all()
         self.app_context.pop()
@@ -502,33 +510,32 @@ class TestRAGPipeline(unittest.TestCase):
             "/teacher/generated-questions/generate",
             data={
                 "course": "RM",
+                "quiz_title": "Flooded Assessment Quiz",
                 "concept_tag": "Sampling, Research Design",
                 "num_questions": "3",
+                "publish_now": "1",
             },
             follow_redirects=True,
         )
         self.assertEqual(resp.status_code, 200)
         new_count = GeneratedQuestionRecord.query.count()
         self.assertEqual(new_count, initial_count + 3)
-        # All generated records should be approved automatically and assigned to student
-        latest_records = GeneratedQuestionRecord.query.order_by(GeneratedQuestionRecord.id.desc()).limit(3).all()
-        for r in latest_records:
-            self.assertEqual(r.validation_status, "approved")
-            self.assertEqual(r.assigned_usn, self.student.usn)
 
-        # Check assigned quiz created for student
-        assigned_quiz = Quiz.query.filter_by(assigned_usn=self.student.usn).first()
-        self.assertIsNotNone(assigned_quiz)
-        self.assertEqual(len(assigned_quiz.questions), 3)
+        # Check published quiz created for course with assigned_usn=None (flooded to all students)
+        flooded_quiz = Quiz.query.filter_by(course="RM", title="Flooded Assessment Quiz").first()
+        self.assertIsNotNone(flooded_quiz)
+        self.assertIsNone(flooded_quiz.assigned_usn)
+        self.assertTrue(flooded_quiz.is_published)
+        self.assertEqual(len(flooded_quiz.questions), 3)
 
-    def test_assigned_quiz_student_isolation_and_submission(self):
+    def test_teacher_quiz_flooding_to_all_students_and_score_updates(self):
         # 1. Create student 2 in course RM
         s2 = Student(usn="1RV21CS002", first_name="Bob", last_name="Smith", course="RM")
         s2.set_password("pass123")
         db.session.add(s2)
         db.session.commit()
 
-        # 2. Teacher generates questions for all enrolled students (Ada & Bob)
+        # 2. Teacher generates and floods quiz to all enrolled students
         with self.client.session_transaction() as sess:
             sess["user_id"] = self.teacher.teacher_id
             sess["role"] = "teacher"
@@ -537,49 +544,73 @@ class TestRAGPipeline(unittest.TestCase):
             "/teacher/generated-questions/generate",
             data={
                 "course": "RM",
+                "quiz_title": "Sampling Unified Quiz",
                 "concept_tag": "Sampling",
                 "num_questions": "2",
+                "publish_now": "1",
             },
             follow_redirects=True,
         )
         self.assertEqual(resp.status_code, 200)
 
-        quiz_ada = Quiz.query.filter_by(assigned_usn="1RV21CS001").first()
-        quiz_bob = Quiz.query.filter_by(assigned_usn="1RV21CS002").first()
-        self.assertIsNotNone(quiz_ada)
-        self.assertIsNotNone(quiz_bob)
-        self.assertNotEqual(quiz_ada.id, quiz_bob.id)
+        quiz = Quiz.query.filter_by(course="RM", title="Sampling Unified Quiz").first()
+        self.assertIsNotNone(quiz)
+        self.assertIsNone(quiz.assigned_usn)  # Course-wide flooded quiz
 
-        # 3. Ada logs in: sees only her assigned quiz, NOT Bob's
+        # 3. Ada logs in: sees the flooded quiz on her dashboard
         with self.client.session_transaction() as sess:
             sess["user_id"] = "1RV21CS001"
             sess["role"] = "student"
 
         dash_resp = self.client.get("/student/dashboard")
         self.assertEqual(dash_resp.status_code, 200)
-        self.assertIn(f"href=\"/student/quiz/{quiz_ada.id}/take\"", dash_resp.get_data(as_text=True))
-        self.assertNotIn(f"href=\"/student/quiz/{quiz_bob.id}/take\"", dash_resp.get_data(as_text=True))
+        self.assertIn(f"href=\"/student/quiz/{quiz.id}/take\"", dash_resp.get_data(as_text=True))
 
-        # 4. Ada tries to access Bob's quiz directly -> 403 Forbidden
-        forbidden_resp = self.client.get(f"/student/quiz/{quiz_bob.id}/take")
-        self.assertEqual(forbidden_resp.status_code, 403)
+        # 4. Bob logs in: ALSO sees the exact same flooded quiz on his dashboard
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = "1RV21CS002"
+            sess["role"] = "student"
 
-        # 5. Ada takes and submits her assigned quiz -> updates IRT and BKT
-        post_data = {}
-        for q in quiz_ada.questions:
-            post_data[f"question_{q.id}"] = q.correct_option
+        dash_bob = self.client.get("/student/dashboard")
+        self.assertEqual(dash_bob.status_code, 200)
+        self.assertIn(f"href=\"/student/quiz/{quiz.id}/take\"", dash_bob.get_data(as_text=True))
 
-        submit_resp = self.client.post(
-            f"/student/quiz/{quiz_ada.id}/take",
+        # 5. Ada takes and submits quiz -> updates Ada's IRT theta and BKT mastery
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = "1RV21CS001"
+            sess["role"] = "student"
+
+        post_data = {f"question_{q.id}": q.correct_option for q in quiz.questions}
+        submit_ada = self.client.post(
+            f"/student/quiz/{quiz.id}/take",
             data=post_data,
             follow_redirects=True,
         )
-        self.assertEqual(submit_resp.status_code, 200)
+        self.assertEqual(submit_ada.status_code, 200)
 
-        # Verify attempt registered
-        attempt = Attempt.query.filter_by(quiz_id=quiz_ada.id, usn="1RV21CS001").first()
-        self.assertIsNotNone(attempt)
-        self.assertEqual(attempt.correct_count, len(quiz_ada.questions))
+        attempt_ada = Attempt.query.filter_by(quiz_id=quiz.id, usn="1RV21CS001").first()
+        self.assertIsNotNone(attempt_ada)
+        self.assertEqual(attempt_ada.correct_count, len(quiz.questions))
+
+        # Check Ada's theta updated
+        theta_ada = StudentTheta.query.filter_by(usn="1RV21CS001").first()
+        self.assertIsNotNone(theta_ada)
+
+        # 6. Bob takes and submits quiz -> updates Bob's IRT theta and BKT mastery independently
+        with self.client.session_transaction() as sess:
+            sess["user_id"] = "1RV21CS002"
+            sess["role"] = "student"
+
+        submit_bob = self.client.post(
+            f"/student/quiz/{quiz.id}/take",
+            data=post_data,
+            follow_redirects=True,
+        )
+        self.assertEqual(submit_bob.status_code, 200)
+
+        attempt_bob = Attempt.query.filter_by(quiz_id=quiz.id, usn="1RV21CS002").first()
+        self.assertIsNotNone(attempt_bob)
+        self.assertEqual(attempt_bob.correct_count, len(quiz.questions))
 
     # -----------------------------------------------------------------------
     # 8. LoRA Fine-Tuning Dataset Export Tests (No PII, Approved Only)
@@ -673,16 +704,21 @@ class TestRAGPipeline(unittest.TestCase):
         self.assertEqual(data["input"]["difficulty"], "Medium")
         self.assertEqual(data["input"]["bloom_level"], "Apply")
 
-    def test_student_adaptive_quiz_setup_renders_without_build_error(self):
-        """Verify student adaptive practice page renders cleanly without BuildError."""
+    def test_student_adaptive_quiz_self_generation_disabled(self):
+        """Verify student self-generation routes redirect to dashboard without BuildError."""
         with self.client.session_transaction() as sess:
             sess["user_id"] = self.student.usn
             sess["role"] = "student"
             sess["usn"] = self.student.usn
 
         response = self.client.get("/student/adaptive-quiz")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Personalized Adaptive Practice", response.data)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/student/dashboard", response.headers["Location"])
+
+        # Verify post submit also redirects safely
+        res_submit = self.client.post("/student/adaptive-quiz/submit")
+        self.assertEqual(res_submit.status_code, 302)
+        self.assertIn("/student/dashboard", res_submit.headers["Location"])
 
         # Verify analytics alias redirects
         res_analytics = self.client.get("/student/analytics")
@@ -708,6 +744,49 @@ class TestRAGPipeline(unittest.TestCase):
         db.session.add(rec)
         db.session.commit()
         self.assertEqual(rec.source_page_or_slide, long_ref)
+
+    def test_document_deletion_cascades_safely_without_foreign_key_violation(self):
+        """Verify deleting a course document unlinks generated questions safely."""
+        from app.rag.service import RAGService
+        doc = CourseDocument(
+            title="Sample Research Notes",
+            filename="notes.pdf",
+            file_path="uploads/materials/test_notes.pdf",
+            file_type="PDF",
+            course="RM",
+            status="PROCESSED",
+            teacher_id=self.teacher.teacher_id,
+        )
+        db.session.add(doc)
+        db.session.commit()
+
+        rec = GeneratedQuestionRecord(
+            course="RM",
+            concept_tag="Sampling",
+            target_difficulty="Medium",
+            question_text="Sample question linked to doc?",
+            option_a="A",
+            option_b="B",
+            option_c="C",
+            option_d="D",
+            correct_option="A",
+            explanation="Explanation",
+            source_document_id=doc.id,
+            source_filename="notes.pdf",
+        )
+        db.session.add(rec)
+        db.session.commit()
+
+        # Execute delete
+        success = RAGService.delete_document(doc.id)
+        self.assertTrue(success)
+
+        # Confirm document is deleted
+        self.assertIsNone(CourseDocument.query.get(doc.id))
+
+        # Confirm question record exists and source_document_id unlinked to None
+        db.session.refresh(rec)
+        self.assertIsNone(rec.source_document_id)
 
 
 if __name__ == "__main__":
