@@ -30,6 +30,7 @@ from app.rag.extractor import (
     EmptyDocumentError,
     UnsupportedFormatError,
 )
+from app.rag.service import RAGService
 from app.rag.chunker import chunk_extracted_units
 from app.rag.embeddings import embed_text, cosine_similarity
 from app.rag.retriever import retrieve_context
@@ -742,6 +743,50 @@ class TestRAGPipeline(unittest.TestCase):
         db.session.add(rec)
         db.session.commit()
         self.assertEqual(rec.source_page_or_slide, long_ref)
+
+    def test_delete_course_document_with_referencing_question_records(self):
+        """Verify deleting a course document nullifies source_document_id on question records without Foreign Key error."""
+        # 1. Create a course document
+        doc = CourseDocument(
+            teacher_id=self.teacher.teacher_id,
+            title="Doc for Deletion",
+            filename="delete_me.txt",
+            file_type="txt",
+            course="RM",
+        )
+        db.session.add(doc)
+        db.session.commit()
+
+        # 2. Create a question record referencing this document
+        rec = GeneratedQuestionRecord(
+            course="RM",
+            concept_tag="Test",
+            target_difficulty="Easy",
+            question_text="Sample question?",
+            option_a="A",
+            option_b="B",
+            option_c="C",
+            option_d="D",
+            correct_option="A",
+            explanation="Explanation",
+            source_document_id=doc.id,
+            source_filename=doc.filename,
+        )
+        db.session.add(rec)
+        db.session.commit()
+
+        # 3. Delete document via RAGService
+        deleted = RAGService.delete_document(doc.id)
+        self.assertTrue(deleted)
+
+        # 4. Document should be deleted
+        self.assertIsNone(CourseDocument.query.get(doc.id))
+
+        # 5. Question record should be preserved with source_document_id set to None
+        updated_rec = GeneratedQuestionRecord.query.get(rec.id)
+        self.assertIsNotNone(updated_rec)
+        self.assertIsNone(updated_rec.source_document_id)
+        self.assertEqual(updated_rec.source_filename, "delete_me.txt")
 
 
 if __name__ == "__main__":

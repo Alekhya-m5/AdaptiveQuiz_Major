@@ -162,6 +162,12 @@ class RAGService:
         if not doc:
             return False
 
+        # Nullify foreign key references in generated_question_records so questions are preserved
+        from app.models import GeneratedQuestionRecord
+        GeneratedQuestionRecord.query.filter_by(source_document_id=document_id).update(
+            {"source_document_id": None}
+        )
+
         if doc.file_path and os.path.exists(doc.file_path):
             try:
                 os.remove(doc.file_path)

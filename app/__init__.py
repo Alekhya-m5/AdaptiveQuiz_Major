@@ -61,6 +61,8 @@ def _run_schema_migrations():
                 conn.execute(db.text("""
                     ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS assigned_usn VARCHAR(50) REFERENCES students(usn);
                     ALTER TABLE generated_question_records ADD COLUMN IF NOT EXISTS assigned_usn VARCHAR(50) REFERENCES students(usn);
+                    ALTER TABLE generated_question_records DROP CONSTRAINT IF EXISTS generated_question_records_source_document_id_fkey;
+                    ALTER TABLE generated_question_records ADD CONSTRAINT generated_question_records_source_document_id_fkey FOREIGN KEY (source_document_id) REFERENCES course_documents(id) ON DELETE SET NULL;
                     ALTER TABLE generated_question_records
                         ALTER COLUMN source_page_or_slide TYPE VARCHAR(500),
                         ALTER COLUMN source_filename TYPE VARCHAR(500),
