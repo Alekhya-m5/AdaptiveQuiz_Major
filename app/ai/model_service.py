@@ -85,9 +85,6 @@ class QwenLoRAModelService:
         if self._is_loaded and self.model is not None:
             return True, None
 
-        if self._load_error is not None:
-            return False, self._load_error
-
         start_time = time.time()
         logger.info(f"Initializing Qwen + LoRA service: Base='{self.base_model_name}', Adapter='{self.adapter_path}'")
 

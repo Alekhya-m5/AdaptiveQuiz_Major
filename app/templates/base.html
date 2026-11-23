@@ -14,6 +14,7 @@
             <div class="d-flex gap-2">
                 {% if session.get('role') == 'student' %}
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('student.dashboard') }}">Dashboard</a>
+                    <a class="btn btn-outline-info btn-sm" href="{{ url_for('student.adaptive_quiz') }}">⚡ Adaptive Practice</a>
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('student.results') }}">My Results</a>
                     <a class="btn btn-outline-light btn-sm" href="{{ url_for('common.logout') }}">Logout</a>
                 {% elif session.get('role') == 'teacher' %}

@@ -168,11 +168,6 @@ class RAGService:
             except Exception as e:
                 logger.warning(f"Could not remove file {doc.file_path}: {e}")
 
-        # Unlink generated questions referencing this document to maintain data integrity
-        from app.models import GeneratedQuestionRecord
-        GeneratedQuestionRecord.query.filter_by(source_document_id=doc.id).update({"source_document_id": None})
-        db.session.flush()
-
         db.session.delete(doc)
         db.session.commit()
         return True

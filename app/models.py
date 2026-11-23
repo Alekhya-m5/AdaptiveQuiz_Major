@@ -434,7 +434,7 @@ class GeneratedQuestionRecord(db.Model):
     correct_option = db.Column(db.String(1), nullable=False)  # 'A', 'B', 'C', 'D'
     explanation = db.Column(db.Text, nullable=False)
 
-    source_document_id = db.Column(db.Integer, db.ForeignKey("course_documents.id", ondelete="SET NULL"), nullable=True)
+    source_document_id = db.Column(db.Integer, db.ForeignKey("course_documents.id"), nullable=True)
     source_filename = db.Column(db.String(500), nullable=True)
     source_page_or_slide = db.Column(db.String(500), nullable=True)
 
