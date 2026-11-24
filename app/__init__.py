@@ -59,6 +59,7 @@ def _run_schema_migrations():
         if db.engine.dialect.name == "postgresql":
             with db.engine.connect() as conn:
                 conn.execute(db.text("""
+                    ALTER TABLE questions ADD COLUMN IF NOT EXISTS difficulty_value FLOAT DEFAULT 0.0;
                     ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS assigned_usn VARCHAR(50) REFERENCES students(usn);
                     ALTER TABLE generated_question_records ADD COLUMN IF NOT EXISTS assigned_usn VARCHAR(50) REFERENCES students(usn);
                     ALTER TABLE generated_question_records DROP CONSTRAINT IF EXISTS generated_question_records_source_document_id_fkey;
