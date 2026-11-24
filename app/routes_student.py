@@ -264,11 +264,12 @@ def adaptive_quiz():
         num_questions = min(3, max(1, int(request.form.get("num_questions", 1))))
 
         questions_list = []
-        for _ in range(num_questions):
+        for q_idx in range(num_questions):
             q_res = generate_adaptive_question(
                 course=student.course,
                 concept_tag=selected_concept,
                 usn=student.usn,
+                question_index=q_idx,
             )
             questions_list.append(q_res)
 

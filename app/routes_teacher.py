@@ -1523,6 +1523,7 @@ def trigger_generation():
             )
 
             diff = q_data.get("target_difficulty") or q_data.get("difficulty", "Medium")
+            diff_value = q_data.get("target_b") if q_data.get("target_b") is not None else diff_val_map.get(diff, 0.0)
             q_item = Question(
                 quiz_id=student_quiz.id,
                 order_index=q_idx,
@@ -1535,7 +1536,7 @@ def trigger_generation():
                 concept_tag=topic,
                 topic=topic,
                 difficulty=diff,
-                difficulty_value=diff_val_map.get(diff, 0.0),
+                difficulty_value=diff_value,
                 marks=1.0,
             )
             db.session.add(q_item)

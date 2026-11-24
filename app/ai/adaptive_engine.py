@@ -30,12 +30,95 @@ class AdaptiveEngine:
     """
 
     @classmethod
+    def calculate_target_irt_difficulty(
+        cls,
+        theta: float,
+        mastery: float,
+        target_difficulty: str,
+    ) -> Dict[str, Any]:
+        """
+        Compute continuous IRT target difficulty and expected Fisher Information.
+        Distinguishes continuous target difficulty from categorical discrete labels.
+        Under the Rasch 1PL model:
+          P(correct | theta, b) = 1 / (1 + exp(-(theta - b)))
+          I(theta, b) = P * (1 - P)  [Maximized at b = theta, where I = 0.25]
+        """
+        # When mastery is high (>= 0.70), nudge target b above theta to challenge
+        # When mastery is low (<= 0.30), nudge target b below theta to scaffold
+        # Otherwise, center around theta for optimal Fisher Information
+        if mastery >= MASTERY_HIGH_THRESHOLD:
+            b_offset = 0.35
+        elif mastery <= 0.30:
+            b_offset = -0.35
+        else:
+            b_offset = 0.0
+
+        # Account for explicit categorical target tier if provided
+        if target_difficulty == "Hard" and theta < 0.5:
+            b_target = max(theta + 0.4, 0.75)
+        elif target_difficulty == "Easy" and theta > -0.5:
+            b_target = min(theta - 0.4, -0.75)
+        else:
+            b_target = theta + b_offset
+
+        # Clamp to realistic psychometric range [-3.5, 3.5]
+        b_target = max(-3.5, min(3.5, b_target))
+
+        diff_z = theta - b_target
+        diff_clipped = max(-35.0, min(35.0, diff_z))
+        p_correct = 1.0 / (1.0 + math.exp(-diff_clipped))
+        fisher_info = p_correct * (1.0 - p_correct)
+
+        return {
+            "target_b": round(b_target, 4),
+            "expected_p_correct": round(p_correct, 4),
+            "fisher_information": round(fisher_info, 4),
+            "is_empirically_calibrated": False,  # Newly generated items are uncalibrated target priors
+        }
+
+    @classmethod
+    def select_best_calibrated_item(
+        cls,
+        theta: float,
+        calibrated_items: list,
+        exclude_item_ids: Optional[list] = None,
+        min_responses: int = 5,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Given a list of calibrated items (each having 'difficulty_b', 'question_id', 'total_responses'),
+        select the item that maximizes Fisher Information I(theta, b) at the learner's theta,
+        excluding items the learner has already attempted.
+        """
+        exclude_set = set(exclude_item_ids or [])
+        valid_items = [
+            it for it in calibrated_items
+            if it.get("question_id") not in exclude_set and it.get("total_responses", 0) >= min_responses
+        ]
+        if not valid_items:
+            return None
+
+        best_item = None
+        best_info = -1.0
+
+        for item in valid_items:
+            b = float(item.get("difficulty_b", 0.0))
+            diff_z = max(-35.0, min(35.0, theta - b))
+            p = 1.0 / (1.0 + math.exp(-diff_z))
+            info = p * (1.0 - p)
+            if info > best_info:
+                best_info = info
+                best_item = {**item, "fisher_info_at_theta": round(info, 4)}
+
+        return best_item
+
+    @classmethod
     def determine_challenge_level(
         cls,
         theta: Optional[float] = None,
         mastery: Optional[float] = None,
         concept_tag: Optional[str] = None,
         previous_attempts: Optional[int] = None,
+        target_difficulty_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Determine target question difficulty, Bloom's taxonomy tier, and cognitive directive.
@@ -268,6 +351,31 @@ class AdaptiveEngine:
                     "Targeting foundational recall and core definitions."
                 )
 
+        # Handle explicit target difficulty override if provided
+        if target_difficulty_override in ("Easy", "Medium", "Hard"):
+            difficulty = target_difficulty_override
+            if target_difficulty_override == "Easy":
+                bloom = "Remember"
+            elif target_difficulty_override == "Medium":
+                bloom = "Understand" if effective_mastery < 0.6 else "Apply"
+            elif target_difficulty_override == "Hard":
+                bloom = "Analyze"
+            cognitive_directive = f"{cognitive_directive} (Target tier manually set to {target_difficulty_override})."
+
+        # Incorporate previous attempts into directive if learner is practicing repeatedly
+        if previous_attempts and previous_attempts > 0:
+            cognitive_directive = (
+                f"{cognitive_directive} Note: learner has attempted {previous_attempts} prior question(s) "
+                f"on {concept_label}. Ensure this question targets a distinct aspect or novel application scenario."
+            )
+
+        # Compute continuous target IRT parameters and Fisher information
+        irt_metrics = cls.calculate_target_irt_difficulty(
+            theta=effective_theta,
+            mastery=effective_mastery,
+            target_difficulty=difficulty,
+        )
+
         difficulty_numeric_map = {"Easy": -1.0, "Medium": 0.0, "Hard": 1.0}
 
         return {
@@ -276,6 +384,10 @@ class AdaptiveEngine:
             "bloom_level": bloom,
             "theta_used": round(effective_theta, 4),
             "mastery_used": round(effective_mastery, 4),
+            "target_b": irt_metrics["target_b"],
+            "expected_p_correct": irt_metrics["expected_p_correct"],
+            "fisher_information": irt_metrics["fisher_information"],
+            "is_empirically_calibrated": False,
             "pedagogical_rationale": rationale,
             "ability_band": ability_band,
             "mastery_band": mastery_band,
@@ -283,5 +395,6 @@ class AdaptiveEngine:
             "cognitive_directive": cognitive_directive,
             "theta_source": theta_source,
             "mastery_source": mastery_source,
+            "previous_attempts": previous_attempts or 0,
         }
 

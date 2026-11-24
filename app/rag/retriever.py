@@ -34,6 +34,8 @@ def retrieve_context(
     top_k: int = DEFAULT_TOP_K,
     similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
     document_id: Optional[int] = None,
+    exclude_chunk_ids: Optional[List[int]] = None,
+    chunk_offset: int = 0,
 ) -> Dict[str, Any]:
     """
     Retrieve top-k relevant course material chunks.
@@ -138,7 +140,26 @@ def retrieve_context(
     # Sort descending by final relevance score
     scored_chunks.sort(key=lambda x: x[0], reverse=True)
 
-    top_results = scored_chunks[:top_k]
+    # Context Diversity: filter or rotate chunks when requested to avoid repeating identical text
+    exclude_set = set(exclude_chunk_ids or [])
+    non_excluded = [sc for sc in scored_chunks if sc[1].id not in exclude_set]
+
+    if len(non_excluded) >= top_k:
+        offset = (chunk_offset % max(1, len(non_excluded) - top_k + 1)) if chunk_offset > 0 else 0
+        top_results = non_excluded[offset : offset + top_k]
+    elif non_excluded:
+        # Prioritize unused chunks, then backfill from previously used chunks to reach top_k
+        top_results = list(non_excluded)
+        needed = top_k - len(top_results)
+        backfill = [sc for sc in scored_chunks if sc[1].id in exclude_set][:needed]
+        top_results.extend(backfill)
+    else:
+        # All available chunks were excluded; rotate using chunk_offset across scored chunks
+        if chunk_offset > 0 and len(scored_chunks) > top_k:
+            offset = chunk_offset % (len(scored_chunks) - top_k + 1)
+            top_results = scored_chunks[offset : offset + top_k]
+        else:
+            top_results = scored_chunks[:top_k]
 
     if not top_results:
         return {

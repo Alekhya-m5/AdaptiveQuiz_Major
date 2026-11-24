@@ -8,9 +8,18 @@ import json
 import logging
 import re
 import time
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 
-from app.models import db, StudentTheta, StudentMastery, GeneratedQuestionRecord, CourseDocument
+from app.models import (
+    db,
+    StudentTheta,
+    StudentMastery,
+    GeneratedQuestionRecord,
+    CourseDocument,
+    Attempt,
+    Response,
+    Question,
+)
 from app.rag.retriever import retrieve_context
 from app.ai.adaptive_engine import AdaptiveEngine
 from app.ai.model_service import QwenLoRAModelService
@@ -60,6 +69,65 @@ def build_system_prompt() -> str:
     )
 
 
+def get_learner_question_history(
+    usn: str,
+    concept_tag: Optional[str] = None,
+    limit: int = 5,
+) -> Tuple[List[str], Optional[str], List[int]]:
+    """
+    Retrieve previously attempted and generated question stems for a learner,
+    along with any revision scaffolding contexts and previously used chunk IDs.
+    Preserves learner history to avoid question repetition while allowing targeted revision.
+    """
+    prev_stems: List[str] = []
+    revision_context: Optional[str] = None
+    used_chunk_ids: List[int] = []
+
+    try:
+        # 1. Attempted questions from live student tests
+        q_query = (
+            db.session.query(Question.question_text, Response.is_correct)
+            .join(Response, Response.question_id == Question.id)
+            .join(Attempt, Attempt.id == Response.attempt_id)
+            .filter(Attempt.usn == usn)
+        )
+        if concept_tag:
+            q_query = q_query.filter(
+                (Question.concept_tag.ilike(f"%{concept_tag}%")) |
+                (Question.topic.ilike(f"%{concept_tag}%"))
+            )
+        attempted_rows = q_query.order_by(Attempt.submitted_at.desc()).limit(limit * 2).all()
+
+        for q_text, is_corr in attempted_rows:
+            if q_text and q_text.strip() not in prev_stems:
+                prev_stems.append(q_text.strip())
+            # If the student recently answered incorrectly on this concept, flag for revision scaffolding
+            if is_corr is False and revision_context is None and q_text:
+                revision_context = f"The learner previously struggled on: '{q_text.strip()}'"
+
+        # 2. Questions generated directly for this student
+        gen_query = GeneratedQuestionRecord.query.filter_by(assigned_usn=usn)
+        if concept_tag:
+            gen_query = gen_query.filter_by(concept_tag=concept_tag)
+        gen_records = gen_query.order_by(GeneratedQuestionRecord.created_at.desc()).limit(limit * 2).all()
+
+        for rec in gen_records:
+            if rec.question_text and rec.question_text.strip() not in prev_stems:
+                prev_stems.append(rec.question_text.strip())
+            if rec.retrieved_chunk_ids:
+                try:
+                    c_ids = json.loads(rec.retrieved_chunk_ids)
+                    if isinstance(c_ids, list):
+                        used_chunk_ids.extend([cid for cid in c_ids if isinstance(cid, int)])
+                except Exception:
+                    pass
+
+    except Exception as e:
+        logger.warning(f"Error querying learner question history for USN '{usn}': {e}")
+
+    return prev_stems[:limit], revision_context, list(set(used_chunk_ids))
+
+
 def build_user_prompt(
     course: str,
     concept_tag: str,
@@ -69,35 +137,70 @@ def build_user_prompt(
     mastery: float,
     retrieved_chunks: List[Dict[str, Any]],
     validation_error_feedback: Optional[str] = None,
+    challenge_profile: Optional[Dict[str, Any]] = None,
+    previous_question_stems: Optional[List[str]] = None,
+    revision_context: Optional[str] = None,
 ) -> str:
     context_text = "\n\n".join(
         f"[Source: {c.get('source_ref')}]\n{c.get('content')}"
         for c in retrieved_chunks
     )
 
-    pedagogical_directives = {
-        "Hard": (
-            f"COGNITIVE DIRECTIVE (HIGH COGNITIVE DEMAND - {target_bloom.upper()}):\n"
-            f"The learner has high latent ability (IRT θ={theta:.2f}) and concept mastery (BKT P(L)={mastery:.2f}).\n"
-            "Formulate an analytical question focusing on subtle legal/technical distinctions, boundary conditions, "
-            "exceptions, or evaluating comparative scenarios directly grounded in the text. "
-            "Do NOT ask a simple definition recall question. Ensure distractors represent plausible, sophisticated near-misses."
-        ),
-        "Medium": (
-            f"COGNITIVE DIRECTIVE (INTERMEDIATE COGNITIVE DEMAND - {target_bloom.upper()}):\n"
-            f"The learner has intermediate ability (IRT θ={theta:.2f}) and concept mastery (BKT P(L)={mastery:.2f}).\n"
-            "Formulate a question testing conceptual comprehension or practical application of the principles. "
-            "Ask how the rule applies in practice or the underlying reasoning explained in the context. "
-            "Distractors should test whether the student genuinely understands the mechanics rather than memorized keywords."
-        ),
-        "Easy": (
-            f"COGNITIVE DIRECTIVE (FOUNDATIONAL COGNITIVE DEMAND - {target_bloom.upper()}):\n"
-            f"The learner has foundational ability (IRT θ={theta:.2f}) and developing mastery (BKT P(L)={mastery:.2f}).\n"
-            "Formulate a clear definition or core principle recognition question directly based on the key facts in the text. "
-            "Ensure the question is straightforward and accessible, with clear distractors that clarify fundamental concepts."
-        ),
-    }
-    directive = pedagogical_directives.get(target_difficulty, pedagogical_directives["Medium"])
+    # Use AdaptiveEngine's specialized cognitive directive if provided
+    if challenge_profile and challenge_profile.get("cognitive_directive"):
+        profile_str = challenge_profile.get("personalization_profile", "adaptive")
+        ability_band = challenge_profile.get("ability_band", "Average")
+        mastery_band = challenge_profile.get("mastery_band", "Moderate")
+        directive = (
+            f"COGNITIVE DIRECTIVE ({profile_str.upper()} - {target_bloom.upper()}):\n"
+            f"{challenge_profile['cognitive_directive']}"
+        )
+    else:
+        pedagogical_directives = {
+            "Hard": (
+                f"COGNITIVE DIRECTIVE (HIGH COGNITIVE DEMAND - {target_bloom.upper()}):\n"
+                f"The learner has high latent ability (IRT θ={theta:.2f}) and concept mastery (BKT P(L)={mastery:.2f}).\n"
+                "Formulate an analytical question focusing on subtle legal/technical distinctions, boundary conditions, "
+                "exceptions, or evaluating comparative scenarios directly grounded in the text. "
+                "Do NOT ask a simple definition recall question. Ensure distractors represent plausible, sophisticated near-misses."
+            ),
+            "Medium": (
+                f"COGNITIVE DIRECTIVE (INTERMEDIATE COGNITIVE DEMAND - {target_bloom.upper()}):\n"
+                f"The learner has intermediate ability (IRT θ={theta:.2f}) and concept mastery (BKT P(L)={mastery:.2f}).\n"
+                "Formulate a question testing conceptual comprehension or practical application of the principles. "
+                "Ask how the rule applies in practice or the underlying reasoning explained in the context. "
+                "Distractors should test whether the student genuinely understands the mechanics rather than memorized keywords."
+            ),
+            "Easy": (
+                f"COGNITIVE DIRECTIVE (FOUNDATIONAL COGNITIVE DEMAND - {target_bloom.upper()}):\n"
+                f"The learner has foundational ability (IRT θ={theta:.2f}) and developing mastery (BKT P(L)={mastery:.2f}).\n"
+                "Formulate a clear definition or core principle recognition question directly based on the key facts in the text. "
+                "Ensure the question is straightforward and accessible, with clear distractors that clarify fundamental concepts."
+            ),
+        }
+        directive = pedagogical_directives.get(target_difficulty, pedagogical_directives["Medium"])
+        profile_str = "standard_adaptive"
+        ability_band = "Average"
+        mastery_band = "Moderate"
+
+    anti_repetition_section = ""
+    if previous_question_stems:
+        stems_formatted = "\n".join(f"- {s}" for s in previous_question_stems[:4])
+        anti_repetition_section = (
+            f"\nPREVIOUSLY ATTEMPTED / GENERATED QUESTIONS FOR THIS LEARNER:\n"
+            f"{stems_formatted}\n"
+            f"ANTI-REPETITION MANDATE:\n"
+            f"Do NOT duplicate, paraphrase, or ask about the exact same sentence or core concept as the above questions. "
+            f"Explore a completely different aspect, relationship, boundary condition, or application of '{concept_tag}' from the source material.\n"
+        )
+
+    revision_section = ""
+    if revision_context:
+        revision_section = (
+            f"\nREVISION SCAFFOLDING GUIDANCE:\n"
+            f"{revision_context}\n"
+            f"The learner has not yet mastered this concept. Provide scaffolded reinforcement of the fundamental principle without duplicating the previous stem.\n"
+        )
 
     prompt = (
         f"<|im_start|>system\n{build_system_prompt()}<|im_end|>\n"
@@ -106,9 +209,12 @@ def build_user_prompt(
         f"Target Concept: {concept_tag}\n"
         f"Target Difficulty: {target_difficulty}\n"
         f"Target Bloom Level: {target_bloom}\n"
-        f"Learner Ability (IRT Theta): {theta:.2f}\n"
-        f"Concept Mastery (BKT P(L)): {mastery:.2f}\n\n"
-        f"{directive}\n\n"
+        f"Learner Ability (IRT Theta): {theta:.2f} ({ability_band} Ability Band)\n"
+        f"Concept Mastery (BKT P(L)): {mastery:.2f} ({mastery_band} Mastery Band)\n"
+        f"Pedagogical Profile: {profile_str}\n\n"
+        f"{directive}\n"
+        f"{revision_section}"
+        f"{anti_repetition_section}\n"
         f"Source Material Context:\n{context_text}\n"
     )
 
@@ -128,12 +234,14 @@ def fallback_grounded_generator(
     theta: float = 0.0,
     mastery: float = 0.20,
     seed_key: Optional[str] = None,
+    previous_question_stems: Optional[List[str]] = None,
+    challenge_profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Pedagogically differentiated fallback generator.
     Activated when local GPU/CPU model service is unavailable or in lightweight environments.
     Extracts statements from retrieved chunks, personalizing question stem, options, cognitive demand,
-    and Bloom's taxonomy tier based on target difficulty and learner metrics.
+    and Bloom's taxonomy tier based on target difficulty, learner metrics, and question history.
     """
     all_sentences = []
     if retrieved_chunks:
@@ -153,18 +261,34 @@ def fallback_grounded_generator(
             f"Under {concept_tag}, exceptions and boundary constraints govern operational validity.",
         ]
 
+    # Filter out sentences that have already been used in previous question stems to ensure diversity
+    prev_stems_lower = [s.lower() for s in (previous_question_stems or [])]
+    fresh_sentences = [
+        sent for sent in all_sentences
+        if not any(sent.lower()[:30] in p for p in prev_stems_lower)
+    ]
+    candidate_sentences = fresh_sentences if fresh_sentences else all_sentences
+
     seed_str = f"{seed_key}_{concept_tag}_{target_difficulty}_{theta:.2f}_{mastery:.2f}"
     hash_val = abs(hash(seed_str))
-    focus_sentence = all_sentences[hash_val % len(all_sentences)]
+    focus_sentence = candidate_sentences[hash_val % len(candidate_sentences)]
     focus_sentence = re.sub(r"^\d+\s*", "", focus_sentence).strip()
+
+    stem_offset = len(previous_question_stems or [])
 
     if target_difficulty == "Hard":
         stem_variants = [
             f"In critically analyzing edge cases and limitations under '{concept_tag}', which legal or methodological distinction is decisive?",
             f"When evaluating boundary conditions and exceptions concerning '{concept_tag}', which principle governs proper determination?",
             f"In a complex scenario involving competing claims under '{concept_tag}', which analytical criterion must be satisfied according to course material?",
+            f"Under advanced comparative review of '{concept_tag}', what foundational constraint limits operational applicability?",
         ]
-        question = stem_variants[hash_val % len(stem_variants)]
+        question = stem_variants[(hash_val + stem_offset) % len(stem_variants)]
+        for offset in range(len(stem_variants)):
+            cand = stem_variants[(hash_val + stem_offset + offset) % len(stem_variants)]
+            if cand not in (previous_question_stems or []):
+                question = cand
+                break
         correct_text = f"Compliance with the statutory constraint that: {focus_sentence}"
         distractors = [
             f"Unilateral action is permitted under '{concept_tag}' without regulatory consensus or dispute review.",
@@ -181,8 +305,14 @@ def fallback_grounded_generator(
             f"How does the principle of '{concept_tag}' apply when resolving practical situations or operational requirements?",
             f"Which scenario best illustrates the practical application of '{concept_tag}' as outlined in the curriculum?",
             f"In understanding the operational mechanisms of '{concept_tag}', why is this specific requirement enforced?",
+            f"According to the curriculum, what functional role does '{concept_tag}' serve in procedural execution?",
         ]
-        question = stem_variants[hash_val % len(stem_variants)]
+        question = stem_variants[(hash_val + stem_offset) % len(stem_variants)]
+        for offset in range(len(stem_variants)):
+            cand = stem_variants[(hash_val + stem_offset + offset) % len(stem_variants)]
+            if cand not in (previous_question_stems or []):
+                question = cand
+                break
         correct_text = f"It enforces the principle that: {focus_sentence}"
         distractors = [
             f"It permits parties to bypass '{concept_tag}' provisions if informal verbal agreements exist.",
@@ -199,8 +329,14 @@ def fallback_grounded_generator(
             f"According to the course materials on '{concept_tag}', which of the following is the primary definition or rule established?",
             f"Under the foundational syllabus for '{concept_tag}', which core statement is explicitly substantiated?",
             f"In the introductory study of '{concept_tag}', which of the following accurately identifies its key principle?",
+            f"Which of the following describes the fundamental premise of '{concept_tag}' as stated in course notes?",
         ]
-        question = stem_variants[hash_val % len(stem_variants)]
+        question = stem_variants[(hash_val + stem_offset) % len(stem_variants)]
+        for offset in range(len(stem_variants)):
+            cand = stem_variants[(hash_val + stem_offset + offset) % len(stem_variants)]
+            if cand not in (previous_question_stems or []):
+                question = cand
+                break
         correct_text = focus_sentence
         distractors = [
             f"It states that '{concept_tag.lower()}' is optional and carries no formal regulatory standing.",
@@ -249,48 +385,74 @@ def generate_adaptive_question(
     max_retries: int = MAX_RETRIES,
     assigned_usn: Optional[str] = None,
     question_index: int = 0,
+    previous_attempts: Optional[int] = None,
+    exclude_chunk_ids: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
     """
     Execute full end-to-end adaptive generation pipeline:
-    1. Resolve learner IRT theta and BKT mastery.
-    2. Compute pedagogical challenge level.
-    3. Retrieve relevant course context via RAG.
-    4. Prompt Qwen+LoRA model service.
-    5. Validate output with retry loop.
-    6. Persist GeneratedQuestionRecord for teacher review and LoRA fine-tuning collection.
+    1. Resolve learner IRT theta and BKT mastery without recalculating them.
+    2. Retrieve learner question history (preventing repetition while allowing revision).
+    3. Compute pedagogical challenge profile via AdaptiveEngine.
+    4. Retrieve diverse course context chunks via RAG with chunk rotation/exclusion.
+    5. Prompt Qwen+LoRA model service with complete AdaptiveEngine directives and anti-repetition guidance.
+    6. Validate output with retry loop.
+    7. Persist GeneratedQuestionRecord for teacher review and LoRA fine-tuning collection.
     """
-    # 1. Resolve Learner Profile Metrics
+    # 1. Resolve Learner Profile Metrics (single source of truth: db records or caller-provided)
     resolved_theta = student_theta
     resolved_mastery = concept_mastery
+    learner_usn = assigned_usn or usn
 
-    if usn:
+    if learner_usn:
         if resolved_theta is None:
-            st = StudentTheta.query.filter_by(usn=usn).first()
+            st = StudentTheta.query.filter_by(usn=learner_usn).first()
             if st and st.theta is not None:
                 resolved_theta = st.theta
 
         if resolved_mastery is None:
-            sm = StudentMastery.query.filter_by(usn=usn, concept_tag=concept_tag).first()
+            sm = StudentMastery.query.filter_by(usn=learner_usn, concept_tag=concept_tag).first()
             if sm and sm.mastery is not None:
                 resolved_mastery = sm.mastery
 
-    # 2. Determine Challenge Level
+    # 2. Retrieve Learner Question History (prevent repetition, identify revision needs, track used chunks)
+    prev_stems: List[str] = []
+    revision_ctx: Optional[str] = None
+    used_chunk_ids: List[int] = list(exclude_chunk_ids or [])
+
+    if learner_usn:
+        hist_stems, rev_context, hist_chunk_ids = get_learner_question_history(
+            usn=learner_usn,
+            concept_tag=concept_tag,
+            limit=5,
+        )
+        prev_stems.extend(hist_stems)
+        if rev_context:
+            revision_ctx = rev_context
+        used_chunk_ids.extend(hist_chunk_ids)
+
+    eff_previous_attempts = previous_attempts if previous_attempts is not None else len(prev_stems)
+
+    # 3. Determine Pedagogical Challenge Profile via AdaptiveEngine
     challenge = AdaptiveEngine.determine_challenge_level(
         theta=resolved_theta,
         mastery=resolved_mastery,
         concept_tag=concept_tag,
+        previous_attempts=eff_previous_attempts,
+        target_difficulty_override=target_difficulty_override,
     )
 
-    difficulty = target_difficulty_override or challenge["difficulty"]
+    difficulty = challenge["difficulty"]
     bloom = challenge["bloom_level"]
     theta_used = challenge["theta_used"]
     mastery_used = challenge["mastery_used"]
 
-    # 3. Retrieve Context via RAG
+    # 4. Retrieve Context via RAG (with context diversity & chunk rotation)
     retrieval_res = retrieve_context(
         course=course,
         concept_tag=concept_tag,
         top_k=top_k_chunks,
+        exclude_chunk_ids=used_chunk_ids if used_chunk_ids else None,
+        chunk_offset=question_index * 2,
     )
     chunks = retrieval_res.get("chunks", [])
     combined_source_text = "\n\n".join(c["content"] for c in chunks) if chunks else ""
@@ -300,7 +462,7 @@ def generate_adaptive_question(
     primary_source_filename = chunks[0]["filename"] if chunks else None
     primary_source_ref = chunks[0]["source_ref"] if chunks else "General Course Knowledge"
 
-    # 4. Generate & Validate with Retries
+    # 5. Generate & Validate with Retries
     model_service = QwenLoRAModelService.get_instance()
     last_errors = []
     generated_mcq_data = None
@@ -322,6 +484,9 @@ def generate_adaptive_question(
             mastery=mastery_used,
             retrieved_chunks=chunks,
             validation_error_feedback=feedback,
+            challenge_profile=challenge,
+            previous_question_stems=prev_stems,
+            revision_context=revision_ctx,
         )
 
         try:
@@ -340,7 +505,9 @@ def generate_adaptive_question(
                     retrieved_chunks=chunks,
                     theta=theta_used,
                     mastery=mastery_used,
-                    seed_key=f"{assigned_usn or usn or 'std'}_{question_index}_{attempt}",
+                    seed_key=f"{learner_usn or 'std'}_{question_index}_{attempt}",
+                    previous_question_stems=prev_stems,
+                    challenge_profile=challenge,
                 )
                 model_name_used = "grounded_template_fallback"
         except Exception as e:
@@ -353,7 +520,9 @@ def generate_adaptive_question(
                 retrieved_chunks=chunks,
                 theta=theta_used,
                 mastery=mastery_used,
-                seed_key=f"{assigned_usn or usn or 'std'}_{question_index}_{attempt}",
+                seed_key=f"{learner_usn or 'std'}_{question_index}_{attempt}",
+                previous_question_stems=prev_stems,
+                challenge_profile=challenge,
             )
             model_name_used = "grounded_template_fallback"
 
@@ -378,13 +547,15 @@ def generate_adaptive_question(
             retrieved_chunks=chunks,
             theta=theta_used,
             mastery=mastery_used,
-            seed_key=f"{assigned_usn or usn or 'std'}_{question_index}_final",
+            seed_key=f"{learner_usn or 'std'}_{question_index}_final",
+            previous_question_stems=prev_stems,
+            challenge_profile=challenge,
         )
         validation_status = "approved"
         validation_notes = f"Model retries exhausted. Fallback used. Errors: {'; '.join(last_errors)}"
         model_name_used = "grounded_template_fallback"
 
-    # 5. Persist GeneratedQuestionRecord for Quality Collection & LoRA Fine-Tuning
+    # 6. Persist GeneratedQuestionRecord for Quality Collection & LoRA Fine-Tuning
     record = GeneratedQuestionRecord(
         course=course,
         concept_tag=concept_tag,
@@ -407,7 +578,7 @@ def generate_adaptive_question(
         source_page_or_slide=primary_source_ref[:500] if primary_source_ref else None,
         model_name=model_name_used[:100] if model_name_used else "Qwen/Qwen3-0.6B",
         adapter_version=adapter_ver[:100] if adapter_ver else "pilot_lora_v1",
-        assigned_usn=assigned_usn or usn,
+        assigned_usn=learner_usn,
         validation_status=validation_status,
         validation_notes=validation_notes,
     )
@@ -423,6 +594,16 @@ def generate_adaptive_question(
         "target_bloom": bloom,
         "learner_theta": theta_used,
         "learner_mastery": mastery_used,
+        "target_b": challenge.get("target_b"),
+        "expected_p_correct": challenge.get("expected_p_correct"),
+        "fisher_information": challenge.get("fisher_information"),
+        "is_empirically_calibrated": False,
+        "ability_band": challenge.get("ability_band"),
+        "mastery_band": challenge.get("mastery_band"),
+        "personalization_profile": challenge.get("personalization_profile"),
+        "cognitive_directive": challenge.get("cognitive_directive"),
+        "previous_attempts_count": eff_previous_attempts,
+        "anti_repetition_applied": len(prev_stems) > 0,
         "question": generated_mcq_data["question"],
         "options": {
             "A": generated_mcq_data["option_a"],

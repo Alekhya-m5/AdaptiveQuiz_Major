@@ -22,6 +22,7 @@ from app.models import (
     Quiz,
     Question,
     Attempt,
+    Response,
     StudentTheta,
     StudentMastery,
 )
@@ -36,7 +37,11 @@ from app.rag.embeddings import embed_text, cosine_similarity
 from app.rag.retriever import retrieve_context
 from app.ai.adaptive_engine import AdaptiveEngine
 from app.ai.validator import validate_mcq_data, parse_json_from_model_output, strip_thinking_tokens
-from app.ai.generator import generate_adaptive_question
+from app.ai.generator import (
+    generate_adaptive_question,
+    build_user_prompt,
+    get_learner_question_history,
+)
 from app.ai.exporter import export_approved_dataset_jsonl
 
 
@@ -787,6 +792,282 @@ class TestRAGPipeline(unittest.TestCase):
         self.assertIsNotNone(updated_rec)
         self.assertIsNone(updated_rec.source_document_id)
         self.assertEqual(updated_rec.source_filename, "delete_me.txt")
+
+    # -----------------------------------------------------------------------
+    # Phase 1: Adaptive Question Generation & IRT Calibration Scenario Tests
+    # -----------------------------------------------------------------------
+
+    def test_scenario_1_low_theta_low_mastery(self):
+        """Scenario 1: Low theta + low concept mastery yields foundational scaffolding."""
+        ch = AdaptiveEngine.determine_challenge_level(theta=-1.5, mastery=0.15, concept_tag="IPR Basics")
+        self.assertEqual(ch["difficulty"], "Easy")
+        self.assertEqual(ch["bloom_level"], "Remember")
+        self.assertEqual(ch["ability_band"], "Low")
+        self.assertEqual(ch["mastery_band"], "Low")
+        self.assertEqual(ch["personalization_profile"], "foundational_scaffolding")
+        self.assertIn("Foundational scaffolding", ch["cognitive_directive"])
+        self.assertLess(ch["target_b"], ch["theta_used"])  # Scaffolding: target_b is easier than theta
+        self.assertFalse(ch["is_empirically_calibrated"])
+
+        prompt = build_user_prompt(
+            course="RM",
+            concept_tag="IPR Basics",
+            target_difficulty=ch["difficulty"],
+            target_bloom=ch["bloom_level"],
+            theta=ch["theta_used"],
+            mastery=ch["mastery_used"],
+            retrieved_chunks=[{"source_ref": "Doc (P1)", "content": "IPR Basics content"}],
+            challenge_profile=ch,
+        )
+        self.assertIn("FOUNDATIONAL_SCAFFOLDING", prompt)
+        self.assertIn("Foundational scaffolding", prompt)
+        self.assertIn("Low Ability Band", prompt)
+        self.assertIn("Low Mastery Band", prompt)
+
+    def test_scenario_2_high_theta_low_mastery(self):
+        """Scenario 2: High theta + low concept mastery yields accelerated acquisition."""
+        ch = AdaptiveEngine.determine_challenge_level(theta=1.8, mastery=0.20, concept_tag="Patent Claims")
+        self.assertEqual(ch["difficulty"], "Medium")
+        self.assertEqual(ch["bloom_level"], "Understand")
+        self.assertEqual(ch["ability_band"], "High")
+        self.assertEqual(ch["mastery_band"], "Low")
+        self.assertEqual(ch["personalization_profile"], "accelerated_acquisition")
+        self.assertIn("Accelerated concept acquisition", ch["cognitive_directive"])
+        self.assertLess(ch["target_b"], ch["theta_used"])  # Nudge below theta to resolve foundational gaps
+
+        prompt = build_user_prompt(
+            course="RM",
+            concept_tag="Patent Claims",
+            target_difficulty=ch["difficulty"],
+            target_bloom=ch["bloom_level"],
+            theta=ch["theta_used"],
+            mastery=ch["mastery_used"],
+            retrieved_chunks=[{"source_ref": "Doc (P1)", "content": "Patent Claims content"}],
+            challenge_profile=ch,
+        )
+        self.assertIn("ACCELERATED_ACQUISITION", prompt)
+        self.assertIn("Accelerated concept acquisition", prompt)
+        self.assertIn("High Ability Band", prompt)
+        self.assertIn("Low Mastery Band", prompt)
+
+    def test_scenario_3_low_theta_high_mastery(self):
+        """Scenario 3: Low theta + high concept mastery yields anchored reinforcement."""
+        ch = AdaptiveEngine.determine_challenge_level(theta=-0.8, mastery=0.85, concept_tag="Trade Secrets")
+        self.assertEqual(ch["difficulty"], "Medium")
+        self.assertEqual(ch["bloom_level"], "Understand")
+        self.assertEqual(ch["ability_band"], "Low")
+        self.assertEqual(ch["mastery_band"], "High")
+        self.assertEqual(ch["personalization_profile"], "anchored_reinforcement")
+        self.assertIn("Anchored reinforcement", ch["cognitive_directive"])
+        self.assertGreater(ch["target_b"], ch["theta_used"])  # Mastery allows higher target challenge
+
+        prompt = build_user_prompt(
+            course="RM",
+            concept_tag="Trade Secrets",
+            target_difficulty=ch["difficulty"],
+            target_bloom=ch["bloom_level"],
+            theta=ch["theta_used"],
+            mastery=ch["mastery_used"],
+            retrieved_chunks=[{"source_ref": "Doc (P1)", "content": "Trade Secrets content"}],
+            challenge_profile=ch,
+        )
+        self.assertIn("ANCHORED_REINFORCEMENT", prompt)
+        self.assertIn("Anchored reinforcement", prompt)
+        self.assertIn("Low Ability Band", prompt)
+        self.assertIn("High Mastery Band", prompt)
+
+    def test_scenario_4_high_theta_high_mastery(self):
+        """Scenario 4: High theta + high concept mastery yields advanced analytical challenge."""
+        ch = AdaptiveEngine.determine_challenge_level(theta=2.0, mastery=0.90, concept_tag="Patent Litigation")
+        self.assertEqual(ch["difficulty"], "Hard")
+        self.assertEqual(ch["bloom_level"], "Analyze")
+        self.assertEqual(ch["ability_band"], "High")
+        self.assertEqual(ch["mastery_band"], "High")
+        self.assertEqual(ch["personalization_profile"], "advanced_challenge")
+        self.assertIn("High-order analytical challenge", ch["cognitive_directive"])
+        self.assertGreater(ch["target_b"], ch["theta_used"])  # Maximum challenge above theta
+
+        prompt = build_user_prompt(
+            course="RM",
+            concept_tag="Patent Litigation",
+            target_difficulty=ch["difficulty"],
+            target_bloom=ch["bloom_level"],
+            theta=ch["theta_used"],
+            mastery=ch["mastery_used"],
+            retrieved_chunks=[{"source_ref": "Doc (P1)", "content": "Patent Litigation content"}],
+            challenge_profile=ch,
+        )
+        self.assertIn("ADVANCED_CHALLENGE", prompt)
+        self.assertIn("High-order analytical challenge", prompt)
+        self.assertIn("High Ability Band", prompt)
+        self.assertIn("High Mastery Band", prompt)
+
+    @mock.patch("app.ai.generator.QwenLoRAModelService.get_instance")
+    def test_scenario_5_consecutive_questions_prevent_repetition(self, mock_get_service):
+        """Scenario 5: Consecutive question generation for the same learner prevents repeating questions."""
+        mock_service = mock.MagicMock()
+        mock_service.is_loaded.return_value = False  # Triggers grounded fallback
+        mock_service.load_model.return_value = (False, "Model not loaded in unit test")
+        mock_service._load_error = "Model not loaded in unit test"
+        mock_get_service.return_value = mock_service
+
+        doc = CourseDocument(
+            teacher_id=self.teacher.teacher_id,
+            title="Multi-Chunk IPR Guide",
+            filename="ipr_guide.txt",
+            file_type="txt",
+            course="RM",
+            topic="Copyright",
+            status="PROCESSED",
+        )
+        db.session.add(doc)
+        db.session.commit()
+
+        # Add 3 distinct chunks
+        c1 = DocumentChunk(
+            document_id=doc.id, chunk_index=0, course="RM", topic="Copyright", concept_tag="Copyright",
+            content="Copyright grants exclusive rights to authors for original literary works and musical creations.",
+            token_count=15, page_number=1,
+            embedding_json=json.dumps(embed_text("Copyright exclusive rights authors original literary works")),
+        )
+        c2 = DocumentChunk(
+            document_id=doc.id, chunk_index=1, course="RM", topic="Copyright", concept_tag="Copyright",
+            content="Fair dealing exceptions permit limited reproduction of copyrighted material for educational critique and review.",
+            token_count=18, page_number=2,
+            embedding_json=json.dumps(embed_text("Fair dealing exceptions reproduction educational critique review")),
+        )
+        c3 = DocumentChunk(
+            document_id=doc.id, chunk_index=2, course="RM", topic="Copyright", concept_tag="Copyright",
+            content="The standard duration of economic rights in copyright extends for sixty years beyond the author's death.",
+            token_count=19, page_number=3,
+            embedding_json=json.dumps(embed_text("Standard duration economic rights sixty years author death")),
+        )
+        db.session.add_all([c1, c2, c3])
+        db.session.commit()
+
+        # Generate Question 1 for student Ada (1RV21CS001)
+        q1 = generate_adaptive_question(
+            course="RM",
+            concept_tag="Copyright",
+            usn="1RV21CS001",
+            question_index=0,
+        )
+        self.assertIsNotNone(q1["question"])
+
+        # Generate Question 2 for the same student on the same concept
+        q2 = generate_adaptive_question(
+            course="RM",
+            concept_tag="Copyright",
+            usn="1RV21CS001",
+            question_index=1,
+        )
+        self.assertIsNotNone(q2["question"])
+
+        # Question stems must be distinct
+        self.assertNotEqual(q1["question"], q2["question"])
+        self.assertTrue(q2["anti_repetition_applied"])
+
+        # Question 2 record in DB should have recorded previous attempts
+        rec2 = GeneratedQuestionRecord.query.get(q2["record_id"])
+        self.assertIn("ANTI-REPETITION MANDATE", rec2.prompt_text)
+        self.assertIn(q1["question"], rec2.prompt_text)
+
+    @mock.patch("app.ai.generator.QwenLoRAModelService.get_instance")
+    def test_scenario_6_different_learners_studying_same_concept(self, mock_get_service):
+        """Scenario 6: Differentiated generation for high ability vs low ability learners on the same concept."""
+        mock_service = mock.MagicMock()
+        mock_service.is_loaded.return_value = False
+        mock_service.load_model.return_value = (False, "Model not loaded in test")
+        mock_service._load_error = "Model not loaded in test"
+        mock_get_service.return_value = mock_service
+
+        doc = CourseDocument(
+            teacher_id=self.teacher.teacher_id,
+            title="Research Designs Guide",
+            filename="research_designs.txt",
+            file_type="txt",
+            course="RM",
+            topic="Research Designs",
+            status="PROCESSED",
+        )
+        db.session.add(doc)
+        db.session.commit()
+
+        chunk = DocumentChunk(
+            document_id=doc.id, chunk_index=0, course="RM", topic="Research Designs", concept_tag="Research Designs",
+            content="Exploratory research design requires flexibility while experimental design requires strict hypothesis controls.",
+            token_count=18, page_number=10,
+            embedding_json=json.dumps(embed_text("Exploratory research design flexibility experimental hypothesis controls")),
+        )
+        db.session.add(chunk)
+        db.session.commit()
+
+        # Student 1: Ada (High theta=2.1, High mastery=0.92)
+        th_ada = StudentTheta.query.filter_by(usn="1RV21CS001").first()
+        th_ada.theta = 2.1
+        sm_ada = StudentMastery.query.filter_by(usn="1RV21CS001", concept_tag="Research Designs").first()
+        if not sm_ada:
+            sm_ada = StudentMastery(usn="1RV21CS001", concept_tag="Research Designs", mastery=0.92)
+            db.session.add(sm_ada)
+        else:
+            sm_ada.mastery = 0.92
+
+        # Student 2: Bob (Low theta=-1.8, Low mastery=0.15)
+        bob = Student(usn="1RV21CS002", first_name="Bob", last_name="Learner", password_hash="testpass", course="RM")
+        db.session.add(bob)
+        th_bob = StudentTheta(usn="1RV21CS002", theta=-1.8)
+        sm_bob = StudentMastery(usn="1RV21CS002", concept_tag="Research Designs", mastery=0.15)
+        db.session.add_all([th_bob, sm_bob])
+        db.session.commit()
+
+        # Generate for Ada
+        res_ada = generate_adaptive_question(
+            course="RM",
+            concept_tag="Research Designs",
+            usn="1RV21CS001",
+        )
+        # Generate for Bob
+        res_bob = generate_adaptive_question(
+            course="RM",
+            concept_tag="Research Designs",
+            usn="1RV21CS002",
+        )
+
+        # Differentiated Pedagogical Directives and Difficulty Tiers
+        self.assertEqual(res_ada["target_difficulty"], "Hard")
+        self.assertEqual(res_ada["target_bloom"], "Analyze")
+        self.assertEqual(res_ada["personalization_profile"], "advanced_challenge")
+        self.assertIn("High-order analytical challenge", res_ada["cognitive_directive"])
+
+        self.assertEqual(res_bob["target_difficulty"], "Easy")
+        self.assertEqual(res_bob["target_bloom"], "Remember")
+        self.assertEqual(res_bob["personalization_profile"], "foundational_scaffolding")
+        self.assertIn("Foundational scaffolding", res_bob["cognitive_directive"])
+
+        # Target IRT parameters must be distinct
+        self.assertGreater(res_ada["target_b"], res_bob["target_b"])
+        self.assertNotEqual(res_ada["question"], res_bob["question"])
+
+    def test_select_best_calibrated_item_fisher_information(self):
+        """Verify selecting best calibrated item by maximizing Fisher Information at learner theta."""
+        calibrated_pool = [
+            {"question_id": "Q_EASY", "difficulty_b": -1.5, "total_responses": 20},
+            {"question_id": "Q_MED", "difficulty_b": 0.0, "total_responses": 30},
+            {"question_id": "Q_HARD", "difficulty_b": 2.0, "total_responses": 25},
+        ]
+
+        # For theta = 1.9, Q_HARD (b=2.0) has maximum Fisher Information
+        best = AdaptiveEngine.select_best_calibrated_item(theta=1.9, calibrated_items=calibrated_pool)
+        self.assertIsNotNone(best)
+        self.assertEqual(best["question_id"], "Q_HARD")
+        self.assertGreater(best["fisher_info_at_theta"], 0.24)
+
+        # Excluding Q_HARD falls back to Q_MED
+        next_best = AdaptiveEngine.select_best_calibrated_item(
+            theta=1.9, calibrated_items=calibrated_pool, exclude_item_ids=["Q_HARD"]
+        )
+        self.assertIsNotNone(next_best)
+        self.assertEqual(next_best["question_id"], "Q_MED")
 
 
 if __name__ == "__main__":
